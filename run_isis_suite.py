@@ -106,6 +106,9 @@ def main():
     # a slightly different position. For a given window size however, the window
     # is the same and correct.
     # NaNs introduced by different length arrays are made 0 (or maybe threshold?)
+    # The method below appears to have the effect of truncating longer series to the
+    # length of the first added. This should not be a problem while the first method
+    # produces a longer set of values
     for method in sorted(BCR.results.keys()):
         try:
             collated_df[method] = pd.DataFrame([x[5] for x in BCR.results[method].values()[0]['prediction_result'][1:]])
@@ -114,7 +117,7 @@ def main():
                                     "from the methods, (usually Karplus). "
                                     "Try again with a fixed window size.")
 
-
+    collated_df.fillna(0, inplace=True)
     print(collated_df)
 
 

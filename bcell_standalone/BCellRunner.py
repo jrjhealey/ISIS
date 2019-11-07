@@ -30,5 +30,6 @@ class BCellRunner(object):
             method_name=method, filename=infile,
             swissprot=None, window_size=window_size
             )
-            print(method)
-            print_chart_table(self.results[method])
+            #For debugging etc
+            #print(method)
+            #print_chart_table(self.results[method])
