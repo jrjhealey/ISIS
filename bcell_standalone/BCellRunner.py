@@ -13,7 +13,9 @@ class BCellRunner(object):
         # List methods to enable looping of all method options
         self.methods = ["Chou-Fasman",
                         "Emini",
-                        "Karplus-Schulz",
+                        # "Karplus-Schulz",
+                        # Karplus-Schulz disabled for the time being due to
+                        # complication with window sizes.
                         "Kolaskar-Tongaonkar",
                         "Parker"]
 # These methods require the tcsh interpreter and netsurfp

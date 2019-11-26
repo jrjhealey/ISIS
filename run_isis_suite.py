@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python2.7
 """
 A wrapper script to run the various tools within the
 in silico immunogenicity IEDB suite
@@ -7,6 +7,15 @@ from __future__ import print_function
 import argparse
 import logging
 import sys
+
+from bcell_standalone.BCellRunner import BCellRunner
+
+import pandas as pd
+pd.set_option('expand_frame_repr', False)
+pd.set_option('display.max_rows', None)
+pd.set_option('display.max_columns', None)
+pd.set_option('display.width', None)
+pd.set_option('display.max_colwidth', -1)
 
 
 NO_COLOR = "\33[m"
@@ -36,7 +45,6 @@ def get_args():
             "--verbose",
             default="1",
             choices=["0", "1", "2"],
-            metavar="Set verbosity level for logging.",
             help="Change the verbosity of output (info/debug/errors)."
         )
         parser.add_argument(
@@ -45,8 +53,6 @@ def get_args():
             action="store",
             help="The sequence to analyse"
         )
-        #parser.add_argument('outfile', action='store', default=None,
-        #                    help='Output file of primers in the chosen format.')
         parser.add_argument(
             "-w",
             "--window_size",
@@ -56,7 +62,6 @@ def get_args():
             help="Window size must be defined for aggregating data, but "
                  "is actually defined on a per-method basis if set as False"
         )
-
         if len(sys.argv) == 1:
             parser.print_help(sys.stderr)
             sys.exit(1)
@@ -80,10 +85,6 @@ def main():
     logger.info("Launching {}...".format(__file__))
 
     # Run the BCellStandalone tools
-    from bcell_standalone.BCellRunner import BCellRunner
-    import pandas as pd
-    pd.set_option('expand_frame_repr', False)
-
     BCR = BCellRunner(args.infile, args.window_size)
 
     # Since the first 5 columns will be the same, select these from the first result
@@ -118,6 +119,7 @@ def main():
                                     "Try again with a fixed window size.")
 
     collated_df.fillna(0, inplace=True)
+    print(args.infile)
     print(collated_df)
 
 
