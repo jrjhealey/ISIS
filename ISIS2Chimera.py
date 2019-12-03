@@ -4,6 +4,7 @@ import os
 import sys
 import argparse
 import pandas as pd
+from collections import OrderedDict
 
 # def get_args():
 #     """Parse command line arguments"""
@@ -46,31 +47,32 @@ import pandas as pd
 #
 #     return parser.parse_args()
 
-def attfile_writer(method, attribute, match_mode, recipient,
-                   position, score):
-    """Synthesise the text content for an attribute file as defined here:
-    https://www.cgl.ucsf.edu/chimera/docs/ContributedSoftware/defineattrib/defineattrib.html#attrfile
+def attfile_writer(attribute, sequence, position, score):
+    """Write a file containing the sequence-position-specific attributes in an
+       easy to parse format for reading in to chimera.
 
-    Requires a list of positions and their corresponding scores as lists"""
+       Note, chimera attribute names must start lower-case, and cannot contain 'unusual' characters
+    """
 
-    content = " ".join(["#",
-                       "Immunogenicity profile for",
-                       "dummy_string",
-                       "with method:",
-                       method]) + "\n"
     # Chimera is very strict on file content, so sanitise the attrib name:
     if "-" in attribute:
-        attribute = attribute.replace("-", "_")
-    elif any(char.isdigit() for char in attribute):
+        attribute = attribute.replace("-", "")
+    if any(char.isdigit() for char in attribute):
         raise ValueError("Digits are not allowed in attribute definitions.")
+    if attribute[0].isupper():
+        attribute = attribute[:1].lower() + attribute[1:]
 
-    content += "attribute: " + attribute.lower() + '\n'
-    content += "match mode: " + match_mode + '\n'
-    content += "recipient: " + recipient + '\n'
-    for p, s in zip(position, score):
-        content += "\t".join(["", ":"+str(p), str(s)]) + '\n'
+    container = OrderedDict()
+    container['AttributeName'] = attribute
+    # If necessary, pad the score to be in register with the right positions
+    container['Score'] = list(score)
+    container['Sequence'] = sequence
+    container['Position'] = list(position)
 
-    return content
+    return container
+
+def pep2seq(column):
+    return "".join([f[0] for f in column] + [column[-1][1:]])
 
 
 def main():
@@ -85,11 +87,7 @@ def main():
     for method in df.columns[4:]:
         #with open('./dummy_file' + method + ".att", 'w') as fh:
             #fh.write(attfile_writer(method,
-        print(attfile_writer(method, "Immunogenicity_" + method,
-                                    match_mode="1-to-1",
-                                    recipient="residues",
-                                    position=df['Position'],
-                                    score=df[method]))
+        print(attfile_writer(method, pep2seq(list(df['Peptide'])), df['Position'], df[method]))
 
 
 
