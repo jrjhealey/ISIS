@@ -84,8 +84,46 @@ for model in openModels.list(modelTypes=Molecule):
                     r = seq.residues[i+offset]
                     setattr(r, entry["AttributeName"], val)
                 # Else, align the sequence of the MODEL to the query ()
-                alignment = pairwise2.align.globalds(modelseq, entry["Sequence"],
+                # Treat the entry seq as reference, model seq as query
+                alignment = pairwise2.align.globalds(entry["Sequence"], modelseq,
                                          blosum62, -10, -0.5)
+                # Next, construct a CIGAR string for the alignment to apply the same set of 'moves'
+                # to the scores arrays.
+                # Based around the behaviour that a match (=) should set the attribute to the corresponding
+                # residue. A mismatch should raise a warning (M) and not set an attribute  but probably not break.
+                # A gap should cause the corresponding value to be dropped from the array.
+                # Afterwards, collapse the sequence (remove all gaps) and then it should be the same length as the
+                # CIGAR-altered score array.
+
+                cigar = alignment2cigar(alignment[0][0], alignment[0][1])
+
+
+def alignment2cigar(ref, qry):
+    """Reconstruct a CIGAR string from a pair of pairwise-aligned sequence strings"""
+    if len(ref) != len(qry):
+        raise Exception('Unequal length alignment found.')
+    cigar = []
+    # Iterate both strings by character
+    for i in range(len(ref)):
+        r, q = ref[i], qry[i]
+        # Ensure no columns of only gaps
+        if r == '-' and q == '-':
+            raise Exception('Found a column where both sequences have gaps. Check alignment.')
+        # Set the correct character
+        op = '=' if r == q else 'I' if r == '-' else 'D' if q == '-' else 'X'
+        # Enumerate the CIGAR integers
+        if len(cigar) > 0 and cigar[-1][1] is op:
+            cigar[-1][0] += 1
+        else:
+            cigar.append([1, op])
+
+    return "".join(map(lambda x: str(x[0]) + x[1], cigar))
+
+def expand_cigar(cigar):
+    """Given a CIGAR string, expand it to it's letter only representation
+       e.g. 4=1M2D3=  ->  ====MDD===
+    """
+    return "".join([int(i) * j for i, j in zip(cigar[::2], cigar[1::2])])
 
 # Alignment strategies:
 #  After alignment, if the sequence is a perfect match, other than gaps, simply find the
