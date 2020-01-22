@@ -1,7 +1,7 @@
 from __future__ import print_function
 import sys
+import re
 from collections import OrderedDict
-
 
 import chimera
 from chimera import openModels
@@ -11,45 +11,88 @@ from chimera import runCommand as rc
 from Bio import pairwise2
 from Bio.SubsMat.MatrixInfo import blosum62
 
-# May not need:
-# def levenshtein_distance(s1, s2):
-#     if len(s1) < len(s2):
-#         return levenshtein_distance(s2, s1)
-#
-#     # len(s1) >= len(s2)
-#     if len(s2) == 0:
-#         return len(s1)
-#
-#     previous_row = range(len(s2) + 1)
-#     for i, c1 in enumerate(s1):
-#         current_row = [i + 1]
-#         for j, c2 in enumerate(s2):
-#             insertions = previous_row[j + 1] + 1
-#             deletions = current_row[j] + 1
-#             substitutions = previous_row[j] + (c1 != c2)
-#             current_row.append(min(insertions, deletions, substitutions))
-#         previous_row = current_row
-#
-#     return previous_row[-1]
+#### Definitions of helper functions
 
+def alignment2cigar(ref, qry):
+    """Reconstruct a CIGAR string from a pair of pairwise-aligned sequence strings"""
+    if len(ref) != len(qry):
+        raise Exception('Unequal length alignment found.')
+    cigar = []
+    # Iterate both strings by character
+    for i in range(len(ref)):
+        r, q = ref[i], qry[i]
+        # Set the correct character
+        op = '-' if (r == "-" and q == "-") else '=' if r == q else \
+             'I' if r == '-' else 'D' if q == '-' else 'X'
+        # Enumerate the CIGAR integers
+        if len(cigar) > 0 and cigar[-1][1] is op:
+            cigar[-1][0] += 1
+        else: cigar.append([1, op])
+    return "".join(map(lambda x: str(x[0]) + x[1], cigar))
+
+
+def expand_cigar(cigar):
+    """Given a CIGAR string, expand it to it's letter only representation.
+       This code uses a modified definition of CIGAR strings that permits dual
+       gap columns as (-).
+
+       M/=  ->  MATCH
+       I    ->  Insertion to the reference
+       D    ->  Deletion to the reference
+       N    ->  Skipped region from the reference (currently unused)
+       S    ->  Soft clipping (currently unused)
+       H    ->  Hard clipping (currently unused)
+       P    ->  Padding (silent deletion from padded reference) (currently unused)
+       =    ->  Sequence match
+       X    ->  Sequence mismatch
+       -    ->  Dual gap column (missing data)
+
+       e.g. 4=1M2D3=  ->  ====MDD===
+
+       e.g. '1-2D13X3D1X1=11X1=7X1=5X1=2X1=1X5I6-' ->
+            '-DDXXXXXXXXXXXXXDDDX=XXXXXXXXXXX=XXXXXXX=XXXXX=XX=XIIIII------'
+    """
+    regex = re.compile(r'(\d+)([-=IDMX])')
+    return "".join([int(num) * op for num, op in
+                   [submatch for submatch in re.findall(regex, cigar)]])
+
+
+def cigar_guided_score_alignment(cigar, scores_list):
+    """Taking a CIGAR representation of a pairwise alignment, expand and
+       recapitulate the 'moveset', and apply corresponding list manipulations
+
+       Behaviour map:
+       D   ->   Sequence deletion: drop the score value
+       M/= ->   Sequence match: propagate the score value
+       I   ->   Sequence insertion: insert dummy data (0) (???)
+                 (It should be unlikely the structure has more sequence)
+       X   ->   Sequence mismatch: insert dummy data (0)
+    """
+    new_scores = []
+    for i, (j, k) in enumerate(zip(expand_cigar(cigar), scores_list)):
+        if j == "=":
+            new_scores.append(scores_list[i])
+        elif j == "D" or j == "-":
+            new_scores.append("-")
+        elif j == "I" or j == "X":
+            new_scores.append(0)
+
+            # Find out how chimera treats missing data for attributes. May need to set "" instead of 0
+    return new_scores
 # Read in the values for the attributes
-# glob a folder of attribute files?
 
 # Read data from file of OrderedDicts as literals
 data = []
 with open(sys.argv[1], 'r') as fh:
-    for line in fh:
-        print(line)
-        data.append(eval(line))
+    data = [eval(line) for line in fh]
+# Consider changing to glob a folder of files once one is working
 
 # General datastructure:
 # OrderedDict([('AttributeName', 'parker'),
 #              ('Score', [2.867, 2.9219999999999997,...
-#              ('Sequence', 'MSTSTSQIAVEYPIPVYRFIVSVGDEKIPFNSVSGLDISYDTIEYRDGVGNWFKMPGQSQSTNITLRKGVFPGKTELFDWINSIQLNQVEKKDITISLTNDAGTELLMTWNVSNAFPTSLTSPSFDATSNDIAVQEITLMADRVIMQAV'),
+#              ('Sequence', 'MSTSTSQIAVEYPIPVYRFIVSVGDEK...
 #              ('Position', [5, 6, 7, 8, 9, 10, 11, 12, 13...
 
-
-assignments = {}
 
 # Split the model
 #rc("split")
@@ -64,7 +107,6 @@ for model in openModels.list(modelTypes=Molecule):
             if entry["Sequence"] == modelseq:
                 # If exact, set residues directly
                 # and add an entry to the dict of associations
-                assignments[model.name] = entry["Score"]
                 for score, res in zip(entry["Score"], model.residues):
                     setattr(res, entry["AttributeName"], score)
             else:
@@ -79,14 +121,18 @@ for model in openModels.list(modelTypes=Molecule):
             		    offset = str(entry["Sequence"].index(modelseq))
                     except ValueError():
                         continue
+                if offset
+                    for offset, val in enumerate(entry["Score"]):
+                        r = seq.residues[i+offset]
+                        setattr(r, entry["AttributeName"], val)
 
-                for offset, val in enumerate(entry["Score"]):
-                    r = seq.residues[i+offset]
-                    setattr(r, entry["AttributeName"], val)
+                # Might be able to do away with the block above if the alignment strategy is solid
+
                 # Else, align the sequence of the MODEL to the query ()
                 # Treat the entry seq as reference, model seq as query
                 alignment = pairwise2.align.globalds(entry["Sequence"], modelseq,
-                                         blosum62, -10, -0.5)
+                                         blosum62, -10, -0.5) # may need to optimise alignment params
+
                 # Next, construct a CIGAR string for the alignment to apply the same set of 'moves'
                 # to the scores arrays.
                 # Based around the behaviour that a match (=) should set the attribute to the corresponding
@@ -95,53 +141,17 @@ for model in openModels.list(modelTypes=Molecule):
                 # Afterwards, collapse the sequence (remove all gaps) and then it should be the same length as the
                 # CIGAR-altered score array.
 
-                cigar = alignment2cigar(alignment[0][0], alignment[0][1])
+                cigar = alignment2cigar(alignment[0][0], alignment[0][1]) # Uses the best alignment
+                new_scores = cigar_guided_score_alignment(cigar, entry["Score"])
+                # Finally, drop all the deleted regions
+                entry["StructureScore"] = list(filter(lambda a: a != "-", new_scores))
+                # For debugging:
+                # print("\n".join([alignment[0][0],expand_cigar(cigar),
+                #                 alignment[0][1], "".join([str(x) for x in new_scores])]))
+                # Doesn't play nice with floats
 
-
-def alignment2cigar(ref, qry):
-    """Reconstruct a CIGAR string from a pair of pairwise-aligned sequence strings"""
-    if len(ref) != len(qry):
-        raise Exception('Unequal length alignment found.')
-    cigar = []
-    # Iterate both strings by character
-    for i in range(len(ref)):
-        r, q = ref[i], qry[i]
-        # Ensure no columns of only gaps
-        if r == '-' and q == '-':
-            raise Exception('Found a column where both sequences have gaps. Check alignment.')
-        # Set the correct character
-        op = '=' if r == q else 'I' if r == '-' else 'D' if q == '-' else 'X'
-        # Enumerate the CIGAR integers
-        if len(cigar) > 0 and cigar[-1][1] is op:
-            cigar[-1][0] += 1
-        else:
-            cigar.append([1, op])
-
-    return "".join(map(lambda x: str(x[0]) + x[1], cigar))
-
-def expand_cigar(cigar):
-    """Given a CIGAR string, expand it to it's letter only representation
-       e.g. 4=1M2D3=  ->  ====MDD===
-    """
-    return "".join([int(i) * j for i, j in zip(cigar[::2], cigar[1::2])])
-
-# Alignment strategies:
-#  After alignment, if the sequence is a perfect match, other than gaps, simply find the
-#  indexes of all gap characters, and drop the corresponding indexes from the score array.
-# something like
-alignment = pairwise2.align.globalds(modelseq, entry["Sequence"], blosum62, -10, -0.5)
-# alignment[0][0] = the first sequence of the first (best or joint best) alignment result (reference)
-# alignment[0][1] = the second sequence of the first (best or joint best) alignment result (query)
-for i, char in enumerate(alignment[0][0])):
-# Iterate the aligned string, if there is a gap char, drop the score value
-# this is then added as a new object to the entry, to preserve the original data
-    temp_scores = entry["Score"]
-    if char == "-":
-        del temp_scores[i]
-    entry["ReindexedScores"] = temp_scores
-
-# This approach only works if gaps are the ONLY issue with the alignment, which should be fine
-# for now, but isn't a robust/future proof approach.
+                for score, res in zip(entry["StructureScore"], model.residues):
+                    setattr(r, entry["AttributeName"], val)
 
 #rc("rangecol parker min white mid white max red") #.format(entry['AttributeName'])
 #

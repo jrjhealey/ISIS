@@ -47,6 +47,19 @@ from collections import OrderedDict
 #
 #     return parser.parse_args()
 
+def pad(lst, lamount, ramount, val):
+    """Pad a list to the left (prepend) or right (extend) by a specified amount
+       with a specific value/entry.
+    """
+    if lamount > 0:
+        lst = ([val] * lamount) + lst
+    if ramount > 0:
+        lst = lst + ([val] * ramount)
+
+    return lst
+
+
+
 def attfile_writer(attribute, sequence, position, score):
     """Write a file containing the sequence-position-specific attributes in an
        easy to parse format for reading in to chimera.
@@ -59,15 +72,20 @@ def attfile_writer(attribute, sequence, position, score):
         attribute = attribute.replace("-", "")
     if any(char.isdigit() for char in attribute):
         raise ValueError("Digits are not allowed in attribute definitions.")
+    # Ensure the first character is lowercase
     if attribute[0].isupper():
         attribute = attribute[:1].lower() + attribute[1:]
 
     container = OrderedDict()
     container['AttributeName'] = attribute
-    # If necessary, pad the score to be in register with the right positions
-    container['Score'] = list(score)
     container['Sequence'] = sequence
     container['Position'] = list(position)
+    # Pad the score with leading and trailing zeros to keep scores in register with position
+    tmp_list = pad(list(score), container['Position'][0]-1, 0, 0)
+    # Use 2 separate rounds of left and right padding so that the correct length for the subsequent
+    # padding can be obtained.
+    container['Score'] = pad(tmp_list, 0, len(sequence)-len(tmp_list), 0)
+
 
     return container
 
