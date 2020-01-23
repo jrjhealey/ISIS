@@ -1,6 +1,8 @@
 from __future__ import print_function
 import sys
 import re
+import logging
+from time import sleep
 from collections import OrderedDict
 
 import chimera
@@ -11,10 +13,17 @@ from chimera import runCommand as rc
 from Bio import pairwise2
 from Bio.SubsMat.MatrixInfo import blosum62
 
+logging.basicConfig(format="[%(asctime)s] %(levelname)-8s->  %(message)s",
+                    level=logging.NOTSET, datefmt='%d/%m/%Y %I:%M:%S %p')
+logger = logging.getLogger(__name__)
+
 #### Definitions of helper functions
 
 def alignment2cigar(ref, qry):
-    """Reconstruct a CIGAR string from a pair of pairwise-aligned sequence strings"""
+    """Reconstruct a CIGAR string from a pair of pairwise-aligned sequence strings
+
+       Function modified from @lh3 on StackOverflow
+    """
     if len(ref) != len(qry):
         raise Exception('Unequal length alignment found.')
     cigar = []
@@ -79,6 +88,14 @@ def cigar_guided_score_alignment(cigar, scores_list):
 
             # Find out how chimera treats missing data for attributes. May need to set "" instead of 0
     return new_scores
+
+class AssociationContainer(object):
+    """A class to hold associations between alignments, structures, and sequences.
+    """
+    def __init__(self, model):
+        self.alignments = []
+        self.model = model
+
 # Read in the values for the attributes
 
 # Read data from file of OrderedDicts as literals
@@ -87,73 +104,88 @@ with open(sys.argv[1], 'r') as fh:
     data = [eval(line) for line in fh]
 # Consider changing to glob a folder of files once one is working
 
-# General datastructure:
-# OrderedDict([('AttributeName', 'parker'),
-#              ('Score', [2.867, 2.9219999999999997,...
-#              ('Sequence', 'MSTSTSQIAVEYPIPVYRFIVSVGDEK...
-#              ('Position', [5, 6, 7, 8, 9, 10, 11, 12, 13...
-
-
 # Split the model
-#rc("split")
-
+logger.info("Splitting model chains...")
+rc("split")
+all_associations = []
+attributes = set()
 # For each model
 for model in openModels.list(modelTypes=Molecule):
-    # For each sequence in each model
+    logger.info("Operating on model: {}.{} {}".format(model.id, model.subid, model.name))
+    # For each sequence in each model (though this should just be one)
     for modelseq in model.sequences():
         # For each entry in the inputfile
+        logger.info("Got model sequence: {}".format(modelseq))
         for entry in data:
-            # First test for exact sequence matches
-            if entry["Sequence"] == modelseq:
-                # If exact, set residues directly
-                # and add an entry to the dict of associations
-                for score, res in zip(entry["Score"], model.residues):
-                    setattr(res, entry["AttributeName"], score)
+            attributes.add(entry["AttributeName"])
+            association = AssociationContainer(model)
+            logger.info("Processing entry: {} {}...{}".format(entry["AttributeName"],
+                                                              entry["Sequence"][0:10],
+                                                              entry["Sequence"][-10:]))
+            association.entry = entry
+            # First test for exact sequence matches for speed
+            if str(entry["Sequence"]) == str(modelseq):
+                # and add an entry to the associations object
+                logger.info("Input sequence is an exact match for model sequence...")
+                all_associations.append(association)
             else:
                 # If model sequence is some contiguous subsequence of the query seq
                 # Figure out where the subsequence starts (reciprocally)
                 # and assign values from that point until the end of the vals
-        		try:
-        		    offest = str(modelseq).index(entry["Sequence"])
-        		    print(m.id, m.subid, m.name, i)
-        		except ValueError:
-                    try:
-            		    offset = str(entry["Sequence"].index(modelseq))
-                    except ValueError():
-                        continue
-                if offset
-                    for offset, val in enumerate(entry["Score"]):
-                        r = seq.residues[i+offset]
-                        setattr(r, entry["AttributeName"], val)
+        		# try:
+        		#     offest = str(modelseq).index(entry["Sequence"])
+        		# except ValueError:
+                #     try:
+            	# 	    offset = str(entry["Sequence"].index(modelseq))
+                #     except ValueError():
+                #         continue
+                # if offset:
+                #     for i, val in enumerate(entry["Score"]):
+                #         r = seq.residues[i+offset]
+                #         setattr(r, entry["AttributeName"], val)
 
                 # Might be able to do away with the block above if the alignment strategy is solid
+                logger.info("Exact full length or substring matches not detected. Switching to alignment based approach...")
 
-                # Else, align the sequence of the MODEL to the query ()
-                # Treat the entry seq as reference, model seq as query
-                alignment = pairwise2.align.globalds(entry["Sequence"], modelseq,
-                                         blosum62, -10, -0.5) # may need to optimise alignment params
+                # Else, align the sequence of the MODEL to the input seq
+                # Treat the entry seq as reference (since it will more often than
+                # not be the longer of the 2), model seq as query
+                alignment = pairwise2.align.globalds(str(entry["Sequence"]), str(modelseq), blosum62, -10, -0.5)
+                logger.info("Alignment:\n {}".format(pairwise2.format_alignment(*alignment[0])))
+                # Gather all top alignments to then filter out the best for application
+                association.alignments.append(alignment[0])
+            all_associations.append(association)
 
-                # Next, construct a CIGAR string for the alignment to apply the same set of 'moves'
-                # to the scores arrays.
-                # Based around the behaviour that a match (=) should set the attribute to the corresponding
-                # residue. A mismatch should raise a warning (M) and not set an attribute  but probably not break.
-                # A gap should cause the corresponding value to be dropped from the array.
-                # Afterwards, collapse the sequence (remove all gaps) and then it should be the same length as the
-                # CIGAR-altered score array.
+# Now associations are assigned, modify scores and apply accordingly
+    # Now, take the best of all of the alignments as the correct one for that protein
+    # Sort the alignments in descending order to take the top one based on the alignment score
+logger.info("Associations completed...")
+for container in all_associations:
+    if len(container.alignments) > 0:
+        logger.info("Alignments detected, manipulating scores to match aligned positions...")
+        container.alignments.sort(key=lambda tup: float(tup[2]))
+    # Next, construct a CIGAR string for the alignment to apply the same set of 'moves'
+    # to the scores arrays.
+        logger.info("Creating CIGARs...")
 
-                cigar = alignment2cigar(alignment[0][0], alignment[0][1]) # Uses the best alignment
-                new_scores = cigar_guided_score_alignment(cigar, entry["Score"])
-                # Finally, drop all the deleted regions
-                entry["StructureScore"] = list(filter(lambda a: a != "-", new_scores))
-                # For debugging:
-                # print("\n".join([alignment[0][0],expand_cigar(cigar),
-                #                 alignment[0][1], "".join([str(x) for x in new_scores])]))
-                # Doesn't play nice with floats
+        container.cigar = alignment2cigar(container.alignments[0][0], container.alignments[0][1]) # Uses the best alignment
+        temp_scores = cigar_guided_score_alignment(container.cigar, container.entry["Score"])
+        # Finally, drop all the deleted regions
+        container.entry["StructureScore"] = list(filter(lambda a: a != "-", temp_scores))
+        # For debugging:
+        # print("\n".join([alignment[0][0],expand_cigar(cigar),
+        #                 alignment[0][1], "".join([str(x) for x in new_scores])]))
+        # Doesn't play nice with floats
+    else:
+        container.entry["StructureScore"] = container.entry["Score"]
 
-                for score, res in zip(entry["StructureScore"], model.residues):
-                    setattr(r, entry["AttributeName"], val)
+    for score, res in zip(container.entry["StructureScore"], container.model.residues):
+        setattr(res, container.entry["AttributeName"], score)
 
-#rc("rangecol parker min white mid white max red") #.format(entry['AttributeName'])
+logger.info("Attributes set. Cycling render views...")
+for attribute in attributes:
+    rc("rangecol {} min white mid white max red".format(attribute))
+    sleep(1)
 #
 # def worms(residue, attribute):
 #     residue.ribbonDrawMode = chimera.Residue.Ribbon_Round
