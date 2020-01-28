@@ -81,10 +81,10 @@ def attfile_writer(attribute, sequence, position, score):
     container['Sequence'] = sequence
     container['Position'] = list(position)
     # Pad the score with leading and trailing zeros to keep scores in register with position
-    tmp_list = pad(list(score), container['Position'][0]-1, 0, 0)
+    tmp_list = pad(list(score), container['Position'][0]-1, 0, None)
     # Use 2 separate rounds of left and right padding so that the correct length for the subsequent
     # padding can be obtained.
-    container['Score'] = pad(tmp_list, 0, len(sequence)-len(tmp_list), 0)
+    container['Score'] = pad(tmp_list, 0, len(sequence)-len(tmp_list), None)
 
 
     return container

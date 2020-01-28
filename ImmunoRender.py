@@ -19,6 +19,16 @@ logger = logging.getLogger(__name__)
 
 #### Definitions of helper functions
 
+def worms(residue, attribute):
+    """Alter chain thicknesses based on an attribute"""
+    residue.ribbonDrawMode = chimera.Residue.Ribbon_Round
+    residue.ribbonDisplay = True
+    if getattr(r, attribute, None) is None:
+        rad = 0.05
+    else:
+        rad = r.attribute/2.0 + 1.0
+        residue.ribbonStyle = chimera.RibbonStyleWorm([rad])
+
 def alignment2cigar(ref, qry):
     """Reconstruct a CIGAR string from a pair of pairwise-aligned sequence strings
 
@@ -105,6 +115,7 @@ with open(sys.argv[1], 'r') as fh:
 # Consider changing to glob a folder of files once one is working
 
 # Split the model
+
 logger.info("Splitting model chains...")
 rc("split")
 all_associations = []
@@ -182,16 +193,17 @@ for container in all_associations:
     for score, res in zip(container.entry["StructureScore"], container.model.residues):
         setattr(res, container.entry["AttributeName"], score)
 
+logger.info("Final assignments:")
+for association in set(all_associations): # set() needed because associations are duplicated for some reason...
+    print("Associated entry: {} {}...{}".format(association.entry["AttributeName"],
+                                               association.entry["Sequence"][0:10],
+                                               association.entry["Sequence"][-10:]))
+    print("With model: {}.{} {}".format(association.model.id,
+                                        association.model.subid,
+                                        association.model.name))
+
 logger.info("Attributes set. Cycling render views...")
 for attribute in attributes:
-    rc("rangecol {} min white mid white max red".format(attribute))
+    rc("rangecol {} min blue mid white max red novalue #097b097b097b".format(attribute))
+    #[worms(res, attribute) for res in model.residues for model in [model for model in openModels.list(modelTypes=Molecule)]
     sleep(1)
-#
-# def worms(residue, attribute):
-#     residue.ribbonDrawMode = chimera.Residue.Ribbon_Round
-#     residue.ribbonDisplay = True
-#     if getattr(r, attribute, None) is None:
-#         rad = 0.05
-#     else:
-#         rad = r.attribute/2.0 + 1.0
-#         residue.ribbonStyle = chimera.RibbonStyleWorm([rad])
