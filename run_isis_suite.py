@@ -21,7 +21,7 @@ pd.set_option('display.max_colwidth', -1)
 NO_COLOR = "\33[m"
 RED, GREEN, ORANGE, BLUE, PURPLE, LBLUE, GREY = map("\33[%dm".__mod__, range(31, 38))
 logging.basicConfig(format="[%(asctime)s] %(levelname)-8s->  %(message)s",
-                    level=logging.NOTSET, datefmt='%d/%m/%Y %I:%M:%S %p')
+                    level=logging.NOTSET, datefmt='%d/%m/%Y %H:%M:%S %p')
 logger = logging.getLogger(__name__)
 
 def add_color(logger_method, color):

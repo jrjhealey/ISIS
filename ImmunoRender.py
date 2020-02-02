@@ -1,8 +1,11 @@
 from __future__ import print_function
+import os
 import sys
 import re
+import glob
 import logging
-from time import sleep
+from time import sleep, time
+import collections
 from collections import OrderedDict
 
 import chimera
@@ -14,7 +17,7 @@ from Bio import pairwise2
 from Bio.SubsMat.MatrixInfo import blosum62
 
 logging.basicConfig(format="[%(asctime)s] %(levelname)-8s->  %(message)s",
-                    level=logging.NOTSET, datefmt='%d/%m/%Y %I:%M:%S %p')
+                    level=logging.NOTSET, datefmt='%d/%m/%Y %H:%M:%S %p')
 logger = logging.getLogger(__name__)
 
 #### Definitions of helper functions
@@ -99,6 +102,7 @@ def cigar_guided_score_alignment(cigar, scores_list):
             # Find out how chimera treats missing data for attributes. May need to set "" instead of 0
     return new_scores
 
+
 class AssociationContainer(object):
     """A class to hold associations between alignments, structures, and sequences.
     """
@@ -106,21 +110,42 @@ class AssociationContainer(object):
         self.alignments = []
         self.model = model
 
-# Read in the values for the attributes
 
+# Read in the values for the attributes
 # Read data from file of OrderedDicts as literals
+start = time()
 data = []
-with open(sys.argv[1], 'r') as fh:
-    data = [eval(line) for line in fh]
-# Consider changing to glob a folder of files once one is working
+try:
+    with open(sys.argv[1]) as fh:
+        for line in fh:
+        # do some basic checking that the file is of the correct format
+            if not isinstance(eval(line), collections.OrderedDict):
+                continue
+            data.append(eval(line))
+except IOError as err:
+    logger.info("No file detected, assuming directory instead.")
+    try:
+        for filename in os.listdir(sys.argv[1]):
+            with open(os.path.join(sys.argv[1], filename), 'r') as fh:
+                for line in fh:
+                # do some basic checking that the file is of the correct format
+                    if not isinstance(eval(line), collections.OrderedDict):
+                        continue
+                    data.append(eval(line))
+    except OSError as err:
+        logger.error("{}\nNo file or directory of files provided/detected.".format(err))
 
 # Split the model
+if len(openModels.list(modelTypes=Molecule)) == 0:
+    logger.error("No open models.")
+    sys.exit(1) # maybe 'break' instead incase this kills the chimera session
 
 logger.info("Splitting model chains...")
 rc("split")
 all_associations = []
 attributes = set()
 # For each model
+# Add the ability to specify specific models to compare against
 for model in openModels.list(modelTypes=Molecule):
     logger.info("Operating on model: {}.{} {}".format(model.id, model.subid, model.name))
     # For each sequence in each model (though this should just be one)
@@ -171,7 +196,7 @@ for model in openModels.list(modelTypes=Molecule):
     # Now, take the best of all of the alignments as the correct one for that protein
     # Sort the alignments in descending order to take the top one based on the alignment score
 logger.info("Associations completed...")
-for container in all_associations:
+for container in set(all_associations): # remove any identical associations?
     if len(container.alignments) > 0:
         logger.info("Alignments detected, manipulating scores to match aligned positions...")
         container.alignments.sort(key=lambda tup: float(tup[2]))
@@ -201,9 +226,26 @@ for association in set(all_associations): # set() needed because associations ar
     print("With model: {}.{} {}".format(association.model.id,
                                         association.model.subid,
                                         association.model.name))
-
+end = time()
+logger.info("Association time taken: {}".format(end - start))
 logger.info("Attributes set. Cycling render views...")
 for attribute in attributes:
-    rc("rangecol {} min blue mid white max red novalue #097b097b097b".format(attribute))
+    rc("rangecol {} min white mid yellow max red novalue #097b097b097b".format(attribute))
     #[worms(res, attribute) for res in model.residues for model in [model for model in openModels.list(modelTypes=Molecule)]
     sleep(1)
+
+# Write a chimera session to avoid needing reassociation
+try:
+    sys.argv[2]
+    rc("save {}_session.py".format(sys.argv[2]))
+except IndexError:
+    pass
+# To save an image
+#import Midas
+#Midas.copy(file='/home/goddard/hoohoo.png', format='PNG')
+# format can be 'PNG', 'JPEG', 'TIFF', 'PS', 'EPS'
+
+
+#chimera.closeSession()
+#rc("stop now")
+#sys.exit(0)
