@@ -101,14 +101,25 @@ def main():
         header=1,
         index_col=0
     )
+    container = OrderedDict()
+    container["Sequence"] = pep2seq(list(df['Peptide']))
+    container["Position"] = list(df["Position"])
 
     for method in df.columns[4:]:
-        #with open('./dummy_file' + method + ".att", 'w') as fh:
-            #fh.write(attfile_writer(method,
-        print(attfile_writer(method, pep2seq(list(df['Peptide'])), df['Position'], df[method]))
+        attribute = method
+        if "-" in attribute:
+            attribute = attribute.replace("-", "")
+        if any(char.isdigit() for char in attribute):
+            raise ValueError("Digits are not allowed in attribute definitions.")
+        # Ensure the first character is lowercase
+        if attribute[0].isupper():
+            attribute = attribute[:1].lower() + attribute[1:]
+        attribute += "Score"
 
+        tmp_list = pad(list(df[method]), container['Position'][0]-1, 0, None)
+        container[attribute] = pad(tmp_list, 0, len(container["Sequence"])-len(tmp_list), None)
 
-
+    print(container)
 
 
 
