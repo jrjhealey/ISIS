@@ -190,7 +190,7 @@ for model in openModels.list(modelTypes=Molecule):
                 logger.info("Alignment:\n {}".format(pairwise2.format_alignment(*alignment[0])))
                 # Gather all top alignments to then filter out the best for application
                 association.alignments.append(alignment[0])
-            all_associations.append(association)
+                all_associations.append(association)
 
 # Now associations are assigned, modify scores and apply accordingly
     # Now, take the best of all of the alignments as the correct one for that protein

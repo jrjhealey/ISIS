@@ -91,6 +91,7 @@ def main():
     # The datastructure from this tool is also fucking insane so this code is gonna
     # be weird... sorry....
     columns = [col for col in BCR.results['Emini'].values()[0]['prediction_result'][0][0:5] if col != 'Residue']
+    epitopes = [method, BCR.results[method].values()[0]['epitopes'] for method in BCR.results]
     collated_df = pd.DataFrame(columns=columns)
 
     for i, value in enumerate(BCR.results['Emini'].values()[0]['prediction_result'][0][0:5]):
