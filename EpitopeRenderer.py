@@ -93,7 +93,7 @@ def main(args):
         except OSError as err:
             logger.error("{}\nNo file or directory of files provided/detected.".format(err))
     logger.info("Got epitopes:")
-    if logger.getEffectiveLevel() > 0:
+    if logger.getEffectiveLevel() < 30:
         for i in all_data:
             print(logger.info(i))
 
@@ -129,10 +129,12 @@ def main(args):
                             logger.debug("Setting residue {} to {} value {}".format(res, attribute, entry[3]))
                             setattr(res, attribute, float(entry[3]))
 
+# Add some logic to print out the number of epitopes predicted?
+
 # Might be useful to calculate the ranges for the attributes so that useful
 # thresholds can be passed to rangecol ahead of time
     if args.render:
-        for attr in set(attributes):
+        for attr in reversed(set(attributes)):
             rc("rangecol {} min yellow max red novalue white".format(attr))
             sleep(0.5)
 
