@@ -9,10 +9,10 @@ Updated on: 05/19/2017
 import os
 import sys
 import pickle
-from util import *
+from .util import *
 
 from collections import OrderedDict
-from method_calculation import MethodScores
+from .method_calculation import MethodScores
 from collections import namedtuple
 SequenceInfo = namedtuple('SequenceInfo', ['sequence_name', 'sequence'])
 
@@ -26,8 +26,8 @@ from iedbtools_utilities.sequence_io import FASTASequenceInput, OneSequenceInput
 class AntibodyEpitopePrediction(object):
     def __init__(self):
         file_path = os.path.join(os.path.dirname(__file__), 'method_scales.pickle')
-        pickle_file = open(file_path, 'rb')
-        self.scale_dict = pickle.load(pickle_file)
+        with open(file_path, 'rb') as pickle_file:
+            self.scale_dict = pickle.load(pickle_file)
 
     def predict_antibody_epitope(self, method_name, swissprot, filename, window_size=None):
         if method_name == 'Bepipred-1.0':

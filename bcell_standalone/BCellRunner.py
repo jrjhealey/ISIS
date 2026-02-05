@@ -1,8 +1,7 @@
 # A runner for Bcell linear epitope prediction
-# Because this program is crappy, this has to be run in py2!!!
 
-from antibody_epitope_prediction import AntibodyEpitopePrediction as AEP
-from util import print_chart_table
+from .antibody_epitope_prediction import AntibodyEpitopePrediction as AEP
+from .util import print_chart_table
 class BCellRunner(object):
     """A class to run, and then hold data from, the various
        B-Cell epitope prediction tools

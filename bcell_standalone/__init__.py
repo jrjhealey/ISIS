@@ -1,6 +1,6 @@
 import tempfile
-from util import *
-from antibody_epitope_prediction import AntibodyEpitopePrediction
+from .util import *
+from .antibody_epitope_prediction import AntibodyEpitopePrediction
 
 
 def predict(method_name=None, swissprot=None, sequences=None, window_size=None):
@@ -11,7 +11,7 @@ def predict(method_name=None, swissprot=None, sequences=None, window_size=None):
         assert type(sequences) is list, "Input file must be a list of sequence(s)."
 
         # write a temporary file from a sequence_list items
-        tmpfile = tempfile.NamedTemporaryFile()
+        tmpfile = tempfile.NamedTemporaryFile(mode='w', delete=False)
         for sequence in sequences:
             tmpfile.write("{}\n".format(sequence))
         tmpfile.seek(0)

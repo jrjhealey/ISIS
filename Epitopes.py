@@ -1,4 +1,4 @@
-#!/usr/bin/env python2.7
+#!/usr/bin/env python3
 """
 A wrapper script to run the various tools within the
 in silico immunogenicity IEDB suite
@@ -61,7 +61,7 @@ def main():
     logger.info("Calling BCellRunner...")
 
     BCR = BCellRunner(args.infile, args.window_size)
-    epitopes = {method:BCR.results[method].values()[0]['epitopes'] for method in BCR.results}
+    epitopes = {method: list(BCR.results[method].values())[0]['epitopes'] for method in BCR.results}
     print(epitopes)
 
 

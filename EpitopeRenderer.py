@@ -1,3 +1,4 @@
+import ast
 import os
 import sys
 import logging
@@ -76,20 +77,26 @@ def main(args):
     try:
         with open(args.inpath) as fh:
             for line in fh:
-            # do some basic checking that the file is of the correct format
-                if not isinstance(eval(line), dict):
+                # do some basic checking that the file is of the correct format
+                try:
+                    parsed = ast.literal_eval(line.strip())
+                    if isinstance(parsed, dict):
+                        all_data.append(parsed)
+                except (ValueError, SyntaxError):
                     continue
-                all_data.append(eval(line))
     except IOError as err:
         logger.info("No file detected, assuming directory instead.")
         try:
             for filename in os.listdir(args.inpath):
                 with open(os.path.join(args.inpath, filename), 'r') as fh:
                     for line in fh:
-                    # do some basic checking that the file is of the correct format
-                        if not isinstance(eval(line), dict):
+                        # do some basic checking that the file is of the correct format
+                        try:
+                            parsed = ast.literal_eval(line.strip())
+                            if isinstance(parsed, dict):
+                                all_data.append(parsed)
+                        except (ValueError, SyntaxError):
                             continue
-                        all_data.append(eval(line))
         except OSError as err:
             logger.error("{}\nNo file or directory of files provided/detected.".format(err))
     logger.info("Got epitopes:")

@@ -98,7 +98,7 @@ class MethodScores(object):
 
         list_values = []
         for i in range(4, len(sequence)-3):
-            sum = 0
+            score_sum = 0
             peptide = ""
             for j in range(0, int(window)):
                 res = sequence[i-4+j:i-4+j+1]
@@ -106,17 +106,17 @@ class MethodScores(object):
                 index = AA.index(res)
 
                 if NAYB[i-4+j] == 0:
-                    sum += BNORM0[index] * WT[j] / 4.0
+                    score_sum += BNORM0[index] * WT[j] / 4.0
                 if NAYB[i-4+j] == 1:
-                    sum += BNORM1[index] * WT[j] / 4.0
+                    score_sum += BNORM1[index] * WT[j] / 4.0
                 if NAYB[i-4+j] == 2:
-                    sum += BNORM2[index] * WT[j] / 4.0
+                    score_sum += BNORM2[index] * WT[j] / 4.0
 
             position = i
             residue = sequence[position-1:position]
             startPos = i - 4 + 1
             endPos = startPos + int(window) - 1
-            list_values.append([position, residue, startPos, endPos, peptide, sum])
+            list_values.append([position, residue, startPos, endPos, peptide, score_sum])
 
         # save the values into a csv file
         csv_file = self.create_csv(list_values)
@@ -139,16 +139,15 @@ class MethodScores(object):
     def bepipred_method(self, name, sequence, window, center):
         threshold = 0
         # create a temporary directory (if doesn't exist)
-        tmpfile = tempfile.NamedTemporaryFile(suffix=".fasta", delete=False)
-        tmpfile.write(">sequence 1\n%s\n" %sequence)
+        tmpfile = tempfile.NamedTemporaryFile(suffix=".fasta", delete=False, mode='w')
+        tmpfile.write(">sequence 1\n%s\n" % sequence)
         tmpfile.close()
         return self.predict_bepipred(tmpfile, sequence, threshold)
 
-    def bepipred_method2(self, name, sequence, window, center, threshold = 0):
-        #threshold = 0
+    def bepipred_method2(self, name, sequence, window, center, threshold=0):
         # create a temporary directory (if doesn't exist)
-        tmpfile = tempfile.NamedTemporaryFile(suffix=".fasta", delete=False)
-        tmpfile.write(">sequence 1\n%s\n" %sequence)
+        tmpfile = tempfile.NamedTemporaryFile(suffix=".fasta", delete=False, mode='w')
+        tmpfile.write(">sequence 1\n%s\n" % sequence)
         tmpfile.close()
         return self.predict_bepipred2(tmpfile, sequence, threshold)
 
@@ -213,12 +212,10 @@ class MethodScores(object):
     def create_csv(self, list_values):
         import csv
 
-        # bcell_tmpdir = './output'
-
         # create a temporary file inside the tmp/ directory
-        tmpfile = tempfile.NamedTemporaryFile(prefix="csv_", delete=False)
+        tmpfile = tempfile.NamedTemporaryFile(prefix="csv_", delete=False, mode='w', newline='')
 
-        with open(tmpfile.name, 'wb') as result:
+        with open(tmpfile.name, 'w', newline='') as result:
             writer = csv.writer(result)
 
             if self.id != 'Bepipred':
@@ -278,10 +275,14 @@ class MethodScores(object):
         path_method = os.path.join(os.path.dirname(__file__), bepipred_executable_dir)
         path_executable = os.path.join(path_method, 'bepipred')
 
-        proc = sub.Popen([path_executable, '-t', str(threshold) , infile.name], stdout=sub.PIPE, stderr=sub.PIPE)
+        proc = sub.Popen([path_executable, '-t', str(threshold), infile.name], stdout=sub.PIPE, stderr=sub.PIPE)
         output, error = proc.communicate()
         if error:
-            msg = "error occurred!"
+            pass  # error occurred but we continue processing
+
+        # Decode bytes to string for Python 3 compatibility
+        if isinstance(output, bytes):
+            output = output.decode('utf-8')
 
         lines = output.splitlines(True)
         new_list = [line.strip() for line in lines if not line.startswith("#")]

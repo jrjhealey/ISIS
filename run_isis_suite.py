@@ -1,4 +1,4 @@
-#!/usr/bin/env python2.7
+#!/usr/bin/env python3
 """
 A wrapper script to run the various tools within the
 in silico immunogenicity IEDB suite
@@ -15,7 +15,7 @@ pd.set_option('expand_frame_repr', False)
 pd.set_option('display.max_rows', None)
 pd.set_option('display.max_columns', None)
 pd.set_option('display.width', None)
-pd.set_option('display.max_colwidth', -1)
+pd.set_option('display.max_colwidth', None)
 
 
 NO_COLOR = "\33[m"
@@ -88,18 +88,18 @@ def main():
     BCR = BCellRunner(args.infile, args.window_size)
 
     # Since the first 5 columns will be the same, select these from the first result
-    # The datastructure from this tool is also fucking insane so this code is gonna
-    # be weird... sorry....
-    columns = [col for col in BCR.results['Emini'].values()[0]['prediction_result'][0][0:5] if col != 'Residue']
-    epitopes = [method, BCR.results[method].values()[0]['epitopes'] for method in BCR.results]
+    # The datastructure from this tool is complex so this code may look unusual
+    emini_result = list(BCR.results['Emini'].values())[0]
+    columns = [col for col in emini_result['prediction_result'][0][0:5] if col != 'Residue']
+    epitopes = {method: list(BCR.results[method].values())[0]['epitopes'] for method in BCR.results}
     collated_df = pd.DataFrame(columns=columns)
 
-    for i, value in enumerate(BCR.results['Emini'].values()[0]['prediction_result'][0][0:5]):
+    for i, value in enumerate(emini_result['prediction_result'][0][0:5]):
         if i == 1:
             # Skip the residue column since its meaningless
             continue
         else:
-            collated_df[value] = [x[i] for x in BCR.results['Emini'].values()[0]['prediction_result'][1:]]
+            collated_df[value] = [x[i] for x in emini_result['prediction_result'][1:]]
 
     # Now for each method, append new columns laterally with the scores
 
@@ -113,11 +113,12 @@ def main():
     # produces a longer set of values
     for method in sorted(BCR.results.keys()):
         try:
-            collated_df[method] = pd.DataFrame([x[5] for x in BCR.results[method].values()[0]['prediction_result'][1:]])
+            method_result = list(BCR.results[method].values())[0]
+            collated_df[method] = pd.DataFrame([x[5] for x in method_result['prediction_result'][1:]])
         except ValueError as e:
-            logger.error(e + '\n' + "Different length arrays were returned "
-                                    "from the methods, (usually Karplus). "
-                                    "Try again with a fixed window size.")
+            logger.error(str(e) + '\n' + "Different length arrays were returned "
+                                         "from the methods, (usually Karplus). "
+                                         "Try again with a fixed window size.")
 
     collated_df.fillna(0, inplace=True)
     print(args.infile)

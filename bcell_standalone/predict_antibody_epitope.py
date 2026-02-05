@@ -11,8 +11,8 @@ import sys
 
 from argparse import ArgumentParser
 
-from antibody_epitope_prediction import AntibodyEpitopePrediction
-from util import *
+from .antibody_epitope_prediction import AntibodyEpitopePrediction
+from .util import *
 
 
 def flatten_list(lis_o_lis):

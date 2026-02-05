@@ -42,7 +42,7 @@ def print_chart_table(results=None):
     for(sequence, sequence_name), scores in list(results.items()):
         print(("input: {}".format(sequence_name)))
         if scores["epitopes"] and len(scores["epitopes"]) > 0:
-            print("Predicted peptides\nNo\tStart\tEnd\tPeptipe\tLength")
+            print("Predicted peptides\nNo\tStart\tEnd\tPeptide\tLength")
             for epitope in scores.get("epitopes"):
                 print(("\t".join(map(str, epitope))))
         for row in scores.get("prediction_result"):

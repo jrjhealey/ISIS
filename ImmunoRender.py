@@ -1,4 +1,5 @@
 from __future__ import print_function
+import ast
 import os
 import sys
 import re
@@ -26,11 +27,12 @@ def worms(residue, attribute):
     """Alter chain thicknesses based on an attribute"""
     residue.ribbonDrawMode = chimera.Residue.Ribbon_Round
     residue.ribbonDisplay = True
-    if getattr(r, attribute, None) is None:
+    attr_value = getattr(residue, attribute, None)
+    if attr_value is None:
         rad = 0.05
     else:
-        rad = r.attribute/2.0 + 1.0
-        residue.ribbonStyle = chimera.RibbonStyleWorm([rad])
+        rad = attr_value / 2.0 + 1.0
+    residue.ribbonStyle = chimera.RibbonStyleWorm([rad])
 
 def alignment2cigar(ref, qry):
     """Reconstruct a CIGAR string from a pair of pairwise-aligned sequence strings
@@ -47,9 +49,10 @@ def alignment2cigar(ref, qry):
         op = '-' if (r == "-" and q == "-") else '=' if r == q else \
              'I' if r == '-' else 'D' if q == '-' else 'X'
         # Enumerate the CIGAR integers
-        if len(cigar) > 0 and cigar[-1][1] is op:
+        if len(cigar) > 0 and cigar[-1][1] == op:
             cigar[-1][0] += 1
-        else: cigar.append([1, op])
+        else:
+            cigar.append([1, op])
     return "".join(map(lambda x: str(x[0]) + x[1], cigar))
 
 
@@ -115,23 +118,36 @@ class AssociationContainer(object):
 # Read data from file of OrderedDicts as literals
 start = time()
 data = []
+
+if len(sys.argv) < 2:
+    logger.error("Usage: ImmunoRender.py <input_file_or_directory> [session_name]")
+    sys.exit(1)
+
+input_path = sys.argv[1]
+
 try:
-    with open(sys.argv[1]) as fh:
+    with open(input_path) as fh:
         for line in fh:
-        # do some basic checking that the file is of the correct format
-            if not isinstance(eval(line), collections.OrderedDict):
+            # do some basic checking that the file is of the correct format
+            try:
+                parsed = ast.literal_eval(line.strip())
+                if isinstance(parsed, (dict, OrderedDict)):
+                    data.append(parsed)
+            except (ValueError, SyntaxError):
                 continue
-            data.append(eval(line))
 except IOError as err:
     logger.info("No file detected, assuming directory instead.")
     try:
-        for filename in os.listdir(sys.argv[1]):
-            with open(os.path.join(sys.argv[1], filename), 'r') as fh:
+        for filename in os.listdir(input_path):
+            with open(os.path.join(input_path, filename), 'r') as fh:
                 for line in fh:
-                # do some basic checking that the file is of the correct format
-                    if not isinstance(eval(line), collections.OrderedDict):
+                    # do some basic checking that the file is of the correct format
+                    try:
+                        parsed = ast.literal_eval(line.strip())
+                        if isinstance(parsed, (dict, OrderedDict)):
+                            data.append(parsed)
+                    except (ValueError, SyntaxError):
                         continue
-                    data.append(eval(line))
     except OSError as err:
         logger.error("{}\nNo file or directory of files provided/detected.".format(err))
 
