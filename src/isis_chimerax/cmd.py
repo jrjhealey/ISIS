@@ -1,64 +1,33 @@
 """
 ChimeraX commands for ISIS epitope prediction.
-
-Commands:
-    isis predict #1 [method emini] [window 7]
-    isis color #1 [method emini] [palette white:yellow:red]
-    isis clear #1
-    isis list
 """
 
-from chimerax.core.commands import (
-    CmdDesc, register, StringArg, IntArg, FloatArg, ModelsArg, EnumOf
-)
-from chimerax.atomic import AtomicStructure
+from chimerax.core.commands import CmdDesc, register, StringArg, IntArg, FloatArg
+from chimerax.atomic import AtomicStructuresArg
 
-# Import ISIS core (handle case where it's not installed)
+# Import ISIS core
 try:
     from isis import predict, predict_all, available_methods, METHOD_INFO
     ISIS_AVAILABLE = True
 except ImportError:
     ISIS_AVAILABLE = False
 
-
 ATTR_PREFIX = "isis_"
+METHOD_CHOICES = ["emini", "parker", "chou-fasman", "kolaskar-tongaonkar", "karplus-schulz"]
 
 
-def _get_sequence(structure):
-    """Extract sequence from a ChimeraX atomic structure."""
-    sequences = []
+def _get_chains(structure):
+    """Extract chains with sequences from structure."""
+    chains = []
     for chain in structure.chains:
-        residues = chain.existing_residues
-        seq = "".join(r.one_letter_code or "X" for r in residues)
-        sequences.append((chain.chain_id, seq, residues))
-    return sequences
-
-
-def _store_predictions(session, structure, predictions, method):
-    """Store prediction results as residue attributes."""
-    attr_name = f"{ATTR_PREFIX}{method.replace('-', '_')}"
-
-    for chain_id, seq, residues in _get_sequence(structure):
-        if method not in predictions.get(chain_id, {}):
-            continue
-
-        pred = predictions[chain_id][method]
-
-        for i, res in enumerate(residues):
-            pos = i + 1
-            score = pred.score_at(pos)
-            if score is not None:
-                setattr(res, attr_name, score)
-
-    return attr_name
+        seq = chain.characters
+        if seq and len(seq) >= 6:
+            chains.append((chain.chain_id, seq, chain.existing_residues))
+    return chains
 
 
 def isis_predict(session, structures, method="emini", window=None, threshold=None):
-    """
-    Run B-cell epitope prediction on structure sequences.
-
-    Results are stored as residue attributes for visualization.
-    """
+    """Run B-cell epitope prediction on structure sequences."""
     if not ISIS_AVAILABLE:
         session.logger.error("ISIS library not installed. Run: pip install isis-epitope")
         return
@@ -69,13 +38,9 @@ def isis_predict(session, structures, method="emini", window=None, threshold=Non
 
     for structure in structures:
         session.logger.info(f"Predicting epitopes for {structure.name}...")
+        attr_name = f"{ATTR_PREFIX}{method.replace('-', '_')}"
 
-        chain_predictions = {}
-        for chain_id, seq, residues in _get_sequence(structure):
-            if len(seq) < 6:
-                session.logger.warning(f"Chain {chain_id}: sequence too short ({len(seq)} aa)")
-                continue
-
+        for chain_id, seq, residues in _get_chains(structure):
             try:
                 pred = predict(
                     seq,
@@ -84,65 +49,47 @@ def isis_predict(session, structures, method="emini", window=None, threshold=Non
                     threshold=threshold,
                     sequence_name=f"{structure.name}_{chain_id}"
                 )
-                chain_predictions[chain_id] = {method: pred}
+
+                # Store scores as residue attributes
+                for i, res in enumerate(residues):
+                    pos = i + 1
+                    score = pred.score_at(pos)
+                    if score is not None:
+                        setattr(res, attr_name, score)
 
                 n_epitopes = len(pred.epitopes)
-                session.logger.info(
-                    f"  Chain {chain_id}: {len(seq)} aa, {n_epitopes} epitopes predicted"
-                )
+                session.logger.info(f"  Chain {chain_id}: {len(seq)} aa, {n_epitopes} epitopes")
                 for ep in pred.epitopes:
                     session.logger.info(f"    {ep.start}-{ep.end}: {ep.sequence}")
 
             except Exception as e:
                 session.logger.error(f"  Chain {chain_id}: {e}")
 
-        attr_name = _store_predictions(session, structure, chain_predictions, method)
         session.logger.info(f"Scores stored as attribute: {attr_name}")
 
 
 def isis_color(session, structures, method="emini", palette="white:yellow:red"):
-    """
-    Color structure by ISIS prediction scores.
-
-    Uses rangecol to map scores to colors.
-    """
+    """Color structure by ISIS prediction scores."""
     from chimerax.core.commands import run
 
     attr_name = f"{ATTR_PREFIX}{method.replace('-', '_')}"
-    colors = palette.split(":")
 
     for structure in structures:
-        spec = structure.atomspec
-
-        # Check if attribute exists
-        has_attr = False
-        for res in structure.residues:
-            if hasattr(res, attr_name):
-                has_attr = True
-                break
-
+        has_attr = any(hasattr(res, attr_name) for res in structure.residues)
         if not has_attr:
             session.logger.warning(
-                f"{structure.name}: No {method} predictions found. Run 'isis predict' first."
+                f"{structure.name}: No {method} predictions. Run 'isis predict' first."
             )
             continue
 
-        # Build rangecol command
-        if len(colors) == 2:
-            cmd = f"color byattribute {attr_name} {spec} palette {colors[0]}:{colors[1]}"
-        elif len(colors) == 3:
-            cmd = f"color byattribute {attr_name} {spec} palette {colors[0]}:{colors[1]}:{colors[2]}"
-        else:
-            cmd = f"color byattribute {attr_name} {spec} palette white:yellow:red"
-
+        spec = structure.atomspec
+        cmd = f"color byattribute {attr_name} {spec} palette {palette}"
         run(session, cmd)
         session.logger.info(f"Colored {structure.name} by {method}")
 
 
-def isis_color_epitopes(session, structures, method="emini", color="red"):
-    """
-    Color only the predicted epitope regions.
-    """
+def isis_epitopes(session, structures, method="emini", color="red"):
+    """Color only predicted epitope regions."""
     if not ISIS_AVAILABLE:
         session.logger.error("ISIS library not installed")
         return
@@ -150,36 +97,26 @@ def isis_color_epitopes(session, structures, method="emini", color="red"):
     from chimerax.core.commands import run
 
     for structure in structures:
-        for chain_id, seq, residues in _get_sequence(structure):
+        for chain_id, seq, residues in _get_chains(structure):
             try:
-                pred = predict(seq, method=method, sequence_name=chain_id)
-
+                pred = predict(seq, method=method)
                 for epitope in pred.epitopes:
-                    # Build residue selection
-                    res_range = f":{epitope.start}-{epitope.end}"
-                    if chain_id:
-                        res_range = f"/{chain_id}{res_range}"
-
-                    spec = f"{structure.atomspec}{res_range}"
+                    start, end = epitope.start, epitope.end
+                    spec = f"{structure.atomspec}/{chain_id}:{start}-{end}"
                     run(session, f"color {spec} {color}")
-
             except Exception as e:
                 session.logger.error(f"Chain {chain_id}: {e}")
 
 
 def isis_clear(session, structures):
-    """
-    Remove ISIS prediction attributes from structures.
-    """
+    """Remove ISIS prediction attributes."""
     for structure in structures:
-        cleared = []
+        cleared = set()
         for res in structure.residues:
             for attr in list(vars(res).keys()):
                 if attr.startswith(ATTR_PREFIX):
                     delattr(res, attr)
-                    if attr not in cleared:
-                        cleared.append(attr)
-
+                    cleared.add(attr)
         if cleared:
             session.logger.info(f"{structure.name}: Cleared {', '.join(cleared)}")
         else:
@@ -187,9 +124,7 @@ def isis_clear(session, structures):
 
 
 def isis_list(session):
-    """
-    List available ISIS prediction methods.
-    """
+    """List available prediction methods."""
     if not ISIS_AVAILABLE:
         session.logger.error("ISIS library not installed")
         return
@@ -197,58 +132,53 @@ def isis_list(session):
     session.logger.info("Available ISIS prediction methods:\n")
     for method in available_methods():
         info = METHOD_INFO[method]
-        session.logger.info(f"  {method}")
-        session.logger.info(f"    {info['name']}")
-        session.logger.info(f"    Window: {info['default_window']}")
-        session.logger.info(f"    {info['description']}\n")
+        session.logger.info(f"  {method}: {info['name']}")
 
 
-def register_commands(command_info, logger):
-    """Register ISIS commands with ChimeraX."""
+def register_command(command_name, logger):
+    """Register a single ISIS command."""
 
-    method_choices = ["emini", "parker", "chou-fasman", "kolaskar-tongaonkar", "karplus-schulz"]
+    if command_name == "isis predict":
+        desc = CmdDesc(
+            required=[("structures", AtomicStructuresArg)],
+            keyword=[
+                ("method", StringArg),
+                ("window", IntArg),
+                ("threshold", FloatArg),
+            ],
+            synopsis="Predict B-cell epitopes"
+        )
+        register("isis predict", desc, isis_predict, logger=logger)
 
-    # isis predict
-    predict_desc = CmdDesc(
-        required=[("structures", ModelsArg)],
-        keyword=[
-            ("method", EnumOf(method_choices)),
-            ("window", IntArg),
-            ("threshold", FloatArg),
-        ],
-        synopsis="Predict B-cell epitopes on structure sequences"
-    )
-    register("isis predict", predict_desc, isis_predict, logger=logger)
+    elif command_name == "isis color":
+        desc = CmdDesc(
+            required=[("structures", AtomicStructuresArg)],
+            keyword=[
+                ("method", StringArg),
+                ("palette", StringArg),
+            ],
+            synopsis="Color by epitope scores"
+        )
+        register("isis color", desc, isis_color, logger=logger)
 
-    # isis color
-    color_desc = CmdDesc(
-        required=[("structures", ModelsArg)],
-        keyword=[
-            ("method", EnumOf(method_choices)),
-            ("palette", StringArg),
-        ],
-        synopsis="Color structure by epitope prediction scores"
-    )
-    register("isis color", color_desc, isis_color, logger=logger)
+    elif command_name == "isis epitopes":
+        desc = CmdDesc(
+            required=[("structures", AtomicStructuresArg)],
+            keyword=[
+                ("method", StringArg),
+                ("color", StringArg),
+            ],
+            synopsis="Highlight epitope regions"
+        )
+        register("isis epitopes", desc, isis_epitopes, logger=logger)
 
-    # isis epitopes (color only epitopes)
-    epitopes_desc = CmdDesc(
-        required=[("structures", ModelsArg)],
-        keyword=[
-            ("method", EnumOf(method_choices)),
-            ("color", StringArg),
-        ],
-        synopsis="Highlight predicted epitope regions"
-    )
-    register("isis epitopes", epitopes_desc, isis_color_epitopes, logger=logger)
+    elif command_name == "isis clear":
+        desc = CmdDesc(
+            required=[("structures", AtomicStructuresArg)],
+            synopsis="Clear ISIS attributes"
+        )
+        register("isis clear", desc, isis_clear, logger=logger)
 
-    # isis clear
-    clear_desc = CmdDesc(
-        required=[("structures", ModelsArg)],
-        synopsis="Remove ISIS prediction attributes"
-    )
-    register("isis clear", clear_desc, isis_clear, logger=logger)
-
-    # isis list
-    list_desc = CmdDesc(synopsis="List available prediction methods")
-    register("isis list", list_desc, isis_list, logger=logger)
+    elif command_name == "isis list":
+        desc = CmdDesc(synopsis="List prediction methods")
+        register("isis list", desc, isis_list, logger=logger)

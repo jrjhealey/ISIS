@@ -19,16 +19,9 @@ class _ISISBundle(BundleAPI):
     api_version = 1
 
     @staticmethod
-    def register_command(bi, ci, logger):
+    def register_command(bundle_info, command_info, logger):
         from . import cmd
-        cmd.register_commands(ci, logger)
-
-    @staticmethod
-    def get_class(class_name):
-        if class_name == "ISISResultsModel":
-            from .results import ISISResultsModel
-            return ISISResultsModel
-        return None
+        cmd.register_command(command_info.name, logger)
 
 
 bundle_api = _ISISBundle()
