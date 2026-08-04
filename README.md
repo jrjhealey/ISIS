@@ -28,6 +28,26 @@ pip install -e .
 
 ### ChimeraX Plugin
 
+#### Easy Install (Recommended)
+
+```bash
+# macOS/Linux - run from the ISIS directory:
+./install_chimerax.sh
+
+# Or use Python directly with ChimeraX's interpreter:
+/Applications/ChimeraX-1.10.app/Contents/bin/python3.11 install_chimerax.py
+```
+
+The installer will:
+1. Find your ChimeraX installation
+2. Install the ISIS core library into ChimeraX's Python
+3. Install the ChimeraX plugin bundle
+4. Restart ChimeraX to complete
+
+#### Manual Install
+
+If the automatic installer doesn't work:
+
 1. **Install the core library into ChimeraX's Python:**
 
 ```bash
@@ -41,14 +61,24 @@ pip install -e .
 "C:\Program Files\ChimeraX\bin\python.exe" -m pip install C:\path\to\ISIS
 ```
 
-2. **Install the ChimeraX bundle:**
+2. **Install the ChimeraX bundle** (in ChimeraX command line):
 
-In ChimeraX command line:
 ```
 devel install /path/to/ISIS/src/isis_chimerax
 ```
 
 3. **Restart ChimeraX**
+
+#### Uninstall
+
+```bash
+./install_chimerax.sh --uninstall
+```
+
+Or manually in ChimeraX:
+```
+toolshed uninstall ChimeraX-ISIS
+```
 
 ---
 
