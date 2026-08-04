@@ -44,6 +44,10 @@ dev = [
     "pytest-cov",
     "biopython>=1.80",
 ]
+ml = [
+    "scikit-learn>=1.0",
+    "joblib>=1.0",
+]
 chimerax = [
     # ChimeraX dependencies are handled by ChimeraX itself
 ]
