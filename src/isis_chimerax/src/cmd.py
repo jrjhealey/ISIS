@@ -35,9 +35,15 @@ def isis_predict(session, structures, method="emini", window=None, threshold=Non
         session.logger.error("No structures specified")
         return
 
+    from chimerax.atomic import Residue
+
     for structure in structures:
         session.logger.info(f"Predicting epitopes for {structure.name}...")
         attr_name = f"{ATTR_PREFIX}{method.replace('-', '_')}"
+
+        # Register the attribute with ChimeraX
+        if not hasattr(Residue, attr_name):
+            Residue.register_attr(session, attr_name, "ISIS", attr_type=float)
 
         for chain_id, seq, residues in _get_chains(structure):
             try:
@@ -50,19 +56,23 @@ def isis_predict(session, structures, method="emini", window=None, threshold=Non
                 )
 
                 # Store scores as residue attributes
+                scores_set = 0
                 for i, res in enumerate(residues):
                     pos = i + 1
                     score = pred.score_at(pos)
                     if score is not None:
-                        setattr(res, attr_name, score)
+                        setattr(res, attr_name, float(score))
+                        scores_set += 1
 
                 n_epitopes = len(pred.epitopes)
-                session.logger.info(f"  Chain {chain_id}: {len(seq)} aa, {n_epitopes} epitopes")
+                session.logger.info(f"  Chain {chain_id}: {len(seq)} aa, {scores_set} scores, {n_epitopes} epitopes")
                 for ep in pred.epitopes:
                     session.logger.info(f"    {ep.start}-{ep.end}: {ep.sequence}")
 
             except Exception as e:
                 session.logger.error(f"  Chain {chain_id}: {e}")
+                import traceback
+                session.logger.error(traceback.format_exc())
 
         session.logger.info(f"Scores stored as attribute: {attr_name}")
 
