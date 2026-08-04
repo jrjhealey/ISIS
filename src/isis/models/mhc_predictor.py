@@ -7,6 +7,7 @@ Random Forest models trained on real IEDB binding data.
 
 import os
 import pickle
+import gzip
 from typing import List, Dict, Optional, Tuple
 import numpy as np
 
@@ -102,18 +103,26 @@ class MHCPredictor:
         self._weights_dir = os.path.join(os.path.dirname(__file__), 'weights')
 
     def _load_models(self, mhc_class: int):
-        """Load models for MHC class."""
+        """Load models for MHC class (supports gzipped files)."""
         if mhc_class == 1 and self.mhc1_models is None:
+            path_gz = os.path.join(self._weights_dir, 'mhc1_iedb_models.pkl.gz')
             path = os.path.join(self._weights_dir, 'mhc1_iedb_models.pkl')
-            if os.path.exists(path):
+            if os.path.exists(path_gz):
+                with gzip.open(path_gz, 'rb') as f:
+                    self.mhc1_models = pickle.load(f)
+            elif os.path.exists(path):
                 with open(path, 'rb') as f:
                     self.mhc1_models = pickle.load(f)
             else:
                 self.mhc1_models = {}
 
         elif mhc_class == 2 and self.mhc2_models is None:
+            path_gz = os.path.join(self._weights_dir, 'mhc2_iedb_models.pkl.gz')
             path = os.path.join(self._weights_dir, 'mhc2_iedb_models.pkl')
-            if os.path.exists(path):
+            if os.path.exists(path_gz):
+                with gzip.open(path_gz, 'rb') as f:
+                    self.mhc2_models = pickle.load(f)
+            elif os.path.exists(path):
                 with open(path, 'rb') as f:
                     self.mhc2_models = pickle.load(f)
             else:
