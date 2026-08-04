@@ -331,6 +331,17 @@ def register_command(session, command_name):
         desc = CmdDesc(synopsis="List prediction methods")
         register("isis list", desc, isis_list, logger=logger)
 
+    elif command_name == "isis consensus":
+        desc = CmdDesc(
+            required=[("structures", AtomicStructuresArg)],
+            keyword=[
+                ("min_methods", IntArg),
+                ("min_length", IntArg),
+            ],
+            synopsis="Consensus epitope prediction (all methods)"
+        )
+        register("isis consensus", desc, isis_consensus, logger=logger)
+
 
 def register_all_commands(session):
     """Register all ISIS commands at bundle initialization."""
