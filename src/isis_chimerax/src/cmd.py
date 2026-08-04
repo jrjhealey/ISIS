@@ -117,12 +117,14 @@ def isis_epitopes(session, structures, method="emini", color="red"):
                 session.logger.error(f"Chain {chain_id}: {e}")
 
 
-def isis_consensus(session, structures, min_methods=2, threshold=None):
+def isis_consensus(session, structures, min_methods=2, min_length=6):
     """
     Run all prediction methods and create consensus score.
 
     The consensus score is the number of methods (0-5) that predict
-    each position as part of an epitope.
+    each position as part of an epitope. Only considers epitopes of
+    min_length or longer. If no consensus epitopes are found, iteratively
+    loosens thresholds until consensus regions are identified.
     """
     if not ISIS_AVAILABLE:
         session.logger.error("ISIS library not installed")
@@ -138,40 +140,115 @@ def isis_consensus(session, structures, min_methods=2, threshold=None):
     if not hasattr(Residue, attr_name):
         Residue.register_attr(session, attr_name, "ISIS", attr_type=float)
 
+    # Threshold multipliers to try (progressively looser)
+    threshold_multipliers = [1.0, 0.9, 0.8, 0.7, 0.6, 0.5]
+
     for structure in structures:
         session.logger.info(f"Running consensus analysis on {structure.name}...")
 
         for chain_id, seq, residues in _get_chains(structure):
-            # Count votes per position
-            votes = [0] * len(seq)
+            best_votes = None
+            best_multiplier = 1.0
+            found_consensus = False
 
-            for method in methods:
-                try:
-                    pred = predict(seq, method=method, threshold=threshold)
-                    for epitope in pred.epitopes:
-                        for pos in range(epitope.start, epitope.end + 1):
-                            if 1 <= pos <= len(seq):
-                                votes[pos - 1] += 1
-                except Exception as e:
-                    session.logger.warning(f"  {method} failed: {e}")
+            # Try progressively looser thresholds until we find consensus
+            for multiplier in threshold_multipliers:
+                votes = [0] * len(seq)
+
+                for method in methods:
+                    try:
+                        # Get default threshold for method and apply multiplier
+                        info = METHOD_INFO.get(method, {})
+                        default_thresh = info.get('default_threshold')
+
+                        if default_thresh is not None:
+                            thresh = default_thresh * multiplier
+                        else:
+                            thresh = None  # Will use average
+
+                        pred = predict(seq, method=method, threshold=thresh)
+
+                        # Only count epitopes that meet minimum length
+                        for epitope in pred.epitopes:
+                            if epitope.length >= min_length:
+                                for pos in range(epitope.start, epitope.end + 1):
+                                    if 1 <= pos <= len(seq):
+                                        votes[pos - 1] += 1
+                    except Exception as e:
+                        session.logger.warning(f"  {method} failed: {e}")
+
+                # Check if we have any consensus regions
+                consensus_regions = _find_consensus_regions(votes, min_methods, min_length)
+
+                if consensus_regions:
+                    best_votes = votes
+                    best_multiplier = multiplier
+                    found_consensus = True
+                    break
+
+                # Save first attempt even if no consensus
+                if best_votes is None:
+                    best_votes = votes
+
+            if found_consensus:
+                if best_multiplier < 1.0:
+                    session.logger.info(f"  Chain {chain_id}: Found consensus with threshold multiplier {best_multiplier}")
+            else:
+                session.logger.info(f"  Chain {chain_id}: No consensus epitopes found (showing raw scores)")
 
             # Store consensus scores
-            consensus_count = 0
             for i, res in enumerate(residues):
-                if i < len(votes):
-                    score = float(votes[i])
-                    setattr(res, attr_name, score)
-                    if score >= min_methods:
-                        consensus_count += 1
+                if i < len(best_votes):
+                    setattr(res, attr_name, float(best_votes[i]))
 
-            session.logger.info(f"  Chain {chain_id}: {consensus_count} positions with {min_methods}+ method agreement")
+            # Report consensus regions
+            consensus_regions = _find_consensus_regions(best_votes, min_methods, min_length)
+            session.logger.info(f"  Chain {chain_id}: {len(consensus_regions)} consensus epitope(s)")
+            for start, end, avg_score in consensus_regions:
+                peptide = seq[start-1:end]
+                session.logger.info(f"    {start}-{end}: {peptide} (avg {avg_score:.1f} methods)")
 
         # Auto-color
         spec = structure.atomspec
         run(session, f"color byattribute {attr_name} {spec} palette white:yellow:orange:red")
 
         session.logger.info(f"Consensus scores stored as: {attr_name}")
-        session.logger.info(f"  0 = no methods, 5 = all methods agree")
+        session.logger.info(f"  Color: white(0) → yellow(1-2) → orange(3-4) → red(5)")
+
+
+def _find_consensus_regions(votes, min_methods, min_length):
+    """Find contiguous regions where min_methods or more agree."""
+    regions = []
+    in_region = False
+    start = 0
+    scores = []
+
+    for i, vote in enumerate(votes):
+        pos = i + 1
+        if vote >= min_methods:
+            if not in_region:
+                in_region = True
+                start = pos
+                scores = [vote]
+            else:
+                scores.append(vote)
+        else:
+            if in_region:
+                in_region = False
+                length = (pos - 1) - start + 1
+                if length >= min_length:
+                    avg_score = sum(scores) / len(scores)
+                    regions.append((start, pos - 1, avg_score))
+                scores = []
+
+    # Handle region at end
+    if in_region:
+        length = len(votes) - start + 1
+        if length >= min_length:
+            avg_score = sum(scores) / len(scores)
+            regions.append((start, len(votes), avg_score))
+
+    return regions
 
 
 def isis_clear(session, structures):
@@ -302,7 +379,7 @@ def register_all_commands(session):
             required=[("structures", AtomicStructuresArg)],
             keyword=[
                 ("min_methods", IntArg),
-                ("threshold", FloatArg),
+                ("min_length", IntArg),
             ],
             synopsis="Consensus epitope prediction (all methods)"
         )
