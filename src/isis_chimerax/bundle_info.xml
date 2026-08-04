@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BundleInfo name="ChimeraX-ISIS"
+            version="2.0.0"
+            package="isis_chimerax"
+            minSessionVersion="1" maxSessionVersion="1">
+
+  <Author>NanoSyrinx</Author>
+  <Email>support@nanosyrinx.com</Email>
+  <URL>https://github.com/nanosyrinx/isis</URL>
+
+  <Synopsis>B-cell epitope prediction and visualization</Synopsis>
+  <Description>
+    ISIS (In Silico Immunogenicity Studies) provides B-cell epitope
+    prediction using established amino acid property scales including
+    Emini surface accessibility, Parker hydrophilicity, Chou-Fasman
+    beta-turn propensity, and Kolaskar-Tongaonkar antigenicity.
+
+    Predictions can be visualized directly on protein structures
+    using color gradients to highlight immunogenic regions.
+  </Description>
+
+  <Categories>
+    <Category name="Sequence"/>
+    <Category name="Structure Analysis"/>
+  </Categories>
+
+  <Dependencies>
+    <Dependency name="ChimeraX-Core" version=">=1.0"/>
+    <Dependency name="ChimeraX-Atomic" version=">=1.0"/>
+  </Dependencies>
+
+  <ExtraFiles>
+    <ExtraFile source="cmd.py"/>
+  </ExtraFiles>
+
+  <Classifiers>
+    <PythonClassifier>Development Status :: 4 - Beta</PythonClassifier>
+    <PythonClassifier>License :: OSI Approved :: MIT License</PythonClassifier>
+    <PythonClassifier>Topic :: Scientific/Engineering :: Bio-Informatics</PythonClassifier>
+  </Classifiers>
+
+  <CModule name="isis">
+    <SourceFile>__init__.py</SourceFile>
+  </CModule>
+
+  <Command name="isis predict">
+    <Synopsis>Predict B-cell epitopes on structure sequences</Synopsis>
+    <Description>
+      Run epitope prediction using amino acid property scales.
+      Results are stored as residue attributes for visualization.
+
+      Usage: isis predict #1 [method emini] [window 7] [threshold 1.0]
+    </Description>
+  </Command>
+
+  <Command name="isis color">
+    <Synopsis>Color structure by epitope prediction scores</Synopsis>
+    <Description>
+      Apply a color gradient based on prediction scores.
+      Low scores are shown in the first color, high in the last.
+
+      Usage: isis color #1 [method emini] [palette white:yellow:red]
+    </Description>
+  </Command>
+
+  <Command name="isis epitopes">
+    <Synopsis>Highlight predicted epitope regions</Synopsis>
+    <Description>
+      Color only the residues within predicted epitope regions.
+
+      Usage: isis epitopes #1 [method emini] [color red]
+    </Description>
+  </Command>
+
+  <Command name="isis clear">
+    <Synopsis>Remove ISIS prediction attributes from structures</Synopsis>
+    <Description>
+      Clear all ISIS-related attributes from residues.
+
+      Usage: isis clear #1
+    </Description>
+  </Command>
+
+  <Command name="isis list">
+    <Synopsis>List available prediction methods</Synopsis>
+    <Description>
+      Show all available epitope prediction methods with descriptions.
+
+      Usage: isis list
+    </Description>
+  </Command>
+
+</BundleInfo>
