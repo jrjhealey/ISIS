@@ -24,7 +24,7 @@ prediction using established amino acid property scales.
   </Dependencies>
 
   <Initializations>
-    <InitAfter bundle="ChimeraX-Core"/>
+    <InitAfter bundle="ChimeraX-Core" type="manager"/>
   </Initializations>
 
   <Classifiers>
