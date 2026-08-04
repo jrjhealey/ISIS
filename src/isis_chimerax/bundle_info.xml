@@ -31,4 +31,9 @@ prediction using established amino acid property scales.
     <Provider name="isis list"/>
   </Providers>
 
+  <Classifiers>
+    <PythonClassifier>Development Status :: 4 - Beta</PythonClassifier>
+    <PythonClassifier>Programming Language :: Python :: 3</PythonClassifier>
+  </Classifiers>
+
 </BundleInfo>
