@@ -64,6 +64,16 @@ from .innate import (
     O_GLYCO_NEGATIVE,
     HYDROPHOBICITY,
 )
+from .tcell import (
+    TcellPredictor,
+    TcellPredictionResult,
+    AVAILABLE_ALLELES,
+    predict_mhc1,
+    predict_mhc2,
+    predict_cleavage,
+    predict_tap,
+    predict_tcell_pipeline,
+)
 
 __all__ = [
     # Base classes and types
@@ -93,6 +103,29 @@ __all__ = [
     "predict_all_conformational",
     "DISCOTOPE_PROPENSITY",
     "BCELL_CONFORMATIONAL_METHODS",
+    # T-cell methods
+    "TcellPredictor",
+    "TcellPredictionResult",
+    "AVAILABLE_ALLELES",
+    "predict_mhc1",
+    "predict_mhc2",
+    "predict_cleavage",
+    "predict_tap",
+    "predict_tcell_pipeline",
+    "TCELL_METHODS",
+    # Innate immunity methods
+    "InnatePredictor",
+    "GlycoSite",
+    "SignalPeptideResult",
+    "MotifMatch",
+    "predict_all_innate",
+    "NLinkedGlycosylationMethod",
+    "OLinkedGlycosylationMethod",
+    "SignalPeptideMethod",
+    "O_GLYCO_POSITIVE",
+    "O_GLYCO_NEGATIVE",
+    "HYDROPHOBICITY",
+    "INNATE_METHODS",
     # Lookup functions
     "get_method",
     "get_method_by_category",
@@ -102,12 +135,24 @@ __all__ = [
 ]
 
 
+# T-cell method registry
+TCELL_METHODS: Dict[str, type] = {
+    "tcell": TcellPredictor,
+}
+
+# Innate immunity method registry
+INNATE_METHODS: Dict[str, type] = {
+    "n-glyco": NLinkedGlycosylationMethod,
+    "o-glyco": OLinkedGlycosylationMethod,
+    "signal-peptide": SignalPeptideMethod,
+}
+
 # Registry of all methods across categories
 _ALL_METHODS: Dict[str, type] = {
     **BCELL_LINEAR_METHODS,
+    **TCELL_METHODS,
+    **INNATE_METHODS,
     # Future: add other categories here
-    # **TCELL_METHODS,
-    # **INNATE_METHODS,
     # **STRUCTURAL_METHODS,
 }
 
@@ -126,10 +171,10 @@ BCELL_CONFORMATIONAL_METHODS = {
 # Category to method registry mapping
 _CATEGORY_REGISTRIES: Dict[MethodCategory, Dict[str, type]] = {
     MethodCategory.BCELL_LINEAR: BCELL_LINEAR_METHODS,
+    MethodCategory.TCELL: TCELL_METHODS,
+    MethodCategory.INNATE: INNATE_METHODS,
     # Future: add other categories here
     # MethodCategory.BCELL_CONFORMATIONAL: BCELL_CONFORMATIONAL_METHODS,
-    # MethodCategory.TCELL: TCELL_METHODS,
-    # MethodCategory.INNATE: INNATE_METHODS,
     # MethodCategory.STRUCTURAL: STRUCTURAL_METHODS,
 }
 
