@@ -1,5 +1,5 @@
 <BundleInfo name="ChimeraX-ISIS"
-            version="2.0.0"
+            version="2.0.1"
             package="chimerax.isis"
             minSessionVersion="1" maxSessionVersion="1">
 
@@ -23,13 +23,9 @@ prediction using established amino acid property scales.
     <Dependency name="ChimeraX-Atomic" version=">=1.0"/>
   </Dependencies>
 
-  <Providers manager="commands">
-    <Provider name="isis predict"/>
-    <Provider name="isis color"/>
-    <Provider name="isis epitopes"/>
-    <Provider name="isis clear"/>
-    <Provider name="isis list"/>
-  </Providers>
+  <Initializations>
+    <InitAfter bundle="ChimeraX-Core"/>
+  </Initializations>
 
   <Classifiers>
     <PythonClassifier>Development Status :: 4 - Beta</PythonClassifier>

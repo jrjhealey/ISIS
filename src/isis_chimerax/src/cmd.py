@@ -182,3 +182,48 @@ def register_command(session, command_name):
     elif command_name == "isis list":
         desc = CmdDesc(synopsis="List prediction methods")
         register("isis list", desc, isis_list, logger=logger)
+
+
+def register_all_commands(session):
+    """Register all ISIS commands at bundle initialization."""
+    logger = session.logger
+
+    desc = CmdDesc(
+        required=[("structures", AtomicStructuresArg)],
+        keyword=[
+            ("method", StringArg),
+            ("window", IntArg),
+            ("threshold", FloatArg),
+        ],
+        synopsis="Predict B-cell epitopes"
+    )
+    register("isis predict", desc, isis_predict, logger=logger)
+
+    desc = CmdDesc(
+        required=[("structures", AtomicStructuresArg)],
+        keyword=[
+            ("method", StringArg),
+            ("palette", StringArg),
+        ],
+        synopsis="Color by epitope scores"
+    )
+    register("isis color", desc, isis_color, logger=logger)
+
+    desc = CmdDesc(
+        required=[("structures", AtomicStructuresArg)],
+        keyword=[
+            ("method", StringArg),
+            ("color", StringArg),
+        ],
+        synopsis="Highlight epitope regions"
+    )
+    register("isis epitopes", desc, isis_epitopes, logger=logger)
+
+    desc = CmdDesc(
+        required=[("structures", AtomicStructuresArg)],
+        synopsis="Clear ISIS attributes"
+    )
+    register("isis clear", desc, isis_clear, logger=logger)
+
+    desc = CmdDesc(synopsis="List prediction methods")
+    register("isis list", desc, isis_list, logger=logger)
