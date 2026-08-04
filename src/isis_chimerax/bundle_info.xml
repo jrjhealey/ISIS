@@ -1,6 +1,7 @@
 <BundleInfo name="ChimeraX-ISIS"
-            version="2.0.1"
+            version="2.0.2"
             package="chimerax.isis"
+            customInit="true"
             minSessionVersion="1" maxSessionVersion="1">
 
   <Author>NanoSyrinx</Author>
@@ -22,10 +23,6 @@ prediction using established amino acid property scales.
     <Dependency name="ChimeraX-Core" version=">=1.0"/>
     <Dependency name="ChimeraX-Atomic" version=">=1.0"/>
   </Dependencies>
-
-  <Initializations>
-    <InitAfter bundle="ChimeraX-Core" type="manager"/>
-  </Initializations>
 
   <Classifiers>
     <PythonClassifier>Development Status :: 4 - Beta</PythonClassifier>

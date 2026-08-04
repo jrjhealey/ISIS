@@ -196,44 +196,54 @@ def register_command(session, command_name):
 
 def register_all_commands(session):
     """Register all ISIS commands at bundle initialization."""
-    logger = session.logger
+    from chimerax.core.commands import register as reg
 
-    desc = CmdDesc(
-        required=[("structures", AtomicStructuresArg)],
-        keyword=[
-            ("method", StringArg),
-            ("window", IntArg),
-            ("threshold", FloatArg),
-        ],
-        synopsis="Predict B-cell epitopes"
-    )
-    register("isis predict", desc, isis_predict, logger=logger)
+    try:
+        session.logger.info("ISIS: Registering commands...")
 
-    desc = CmdDesc(
-        required=[("structures", AtomicStructuresArg)],
-        keyword=[
-            ("method", StringArg),
-            ("palette", StringArg),
-        ],
-        synopsis="Color by epitope scores"
-    )
-    register("isis color", desc, isis_color, logger=logger)
+        desc = CmdDesc(
+            required=[("structures", AtomicStructuresArg)],
+            keyword=[
+                ("method", StringArg),
+                ("window", IntArg),
+                ("threshold", FloatArg),
+            ],
+            synopsis="Predict B-cell epitopes"
+        )
+        reg("isis predict", desc, isis_predict)
 
-    desc = CmdDesc(
-        required=[("structures", AtomicStructuresArg)],
-        keyword=[
-            ("method", StringArg),
-            ("color", StringArg),
-        ],
-        synopsis="Highlight epitope regions"
-    )
-    register("isis epitopes", desc, isis_epitopes, logger=logger)
+        desc = CmdDesc(
+            required=[("structures", AtomicStructuresArg)],
+            keyword=[
+                ("method", StringArg),
+                ("palette", StringArg),
+            ],
+            synopsis="Color by epitope scores"
+        )
+        reg("isis color", desc, isis_color)
 
-    desc = CmdDesc(
-        required=[("structures", AtomicStructuresArg)],
-        synopsis="Clear ISIS attributes"
-    )
-    register("isis clear", desc, isis_clear, logger=logger)
+        desc = CmdDesc(
+            required=[("structures", AtomicStructuresArg)],
+            keyword=[
+                ("method", StringArg),
+                ("color", StringArg),
+            ],
+            synopsis="Highlight epitope regions"
+        )
+        reg("isis epitopes", desc, isis_epitopes)
 
-    desc = CmdDesc(synopsis="List prediction methods")
-    register("isis list", desc, isis_list, logger=logger)
+        desc = CmdDesc(
+            required=[("structures", AtomicStructuresArg)],
+            synopsis="Clear ISIS attributes"
+        )
+        reg("isis clear", desc, isis_clear)
+
+        desc = CmdDesc(synopsis="List prediction methods")
+        reg("isis list", desc, isis_list)
+
+        session.logger.info("ISIS: Commands registered successfully")
+
+    except Exception as e:
+        session.logger.error(f"ISIS: Failed to register commands: {e}")
+        import traceback
+        session.logger.error(traceback.format_exc())
