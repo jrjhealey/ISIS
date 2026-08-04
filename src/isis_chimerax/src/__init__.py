@@ -4,6 +4,8 @@ ISIS ChimeraX Plugin - B-cell epitope prediction
 
 from chimerax.core.toolshed import BundleAPI
 
+_commands_registered = False
+
 
 class _ISISBundle(BundleAPI):
 
@@ -12,8 +14,20 @@ class _ISISBundle(BundleAPI):
     @staticmethod
     def initialize(session, bundle_info):
         """Register commands when bundle initializes."""
-        from . import cmd
-        cmd.register_all_commands(session)
+        global _commands_registered
+        if not _commands_registered:
+            from . import cmd
+            cmd.register_all_commands(session)
+            _commands_registered = True
+
+    @staticmethod
+    def start_tool(session, tool_name):
+        # Register commands if not already done
+        global _commands_registered
+        if not _commands_registered:
+            from . import cmd
+            cmd.register_all_commands(session)
+            _commands_registered = True
 
     @staticmethod
     def finish(session, bundle_info):
@@ -21,7 +35,3 @@ class _ISISBundle(BundleAPI):
 
 
 bundle_api = _ISISBundle()
-
-
-def get_api():
-    return bundle_api

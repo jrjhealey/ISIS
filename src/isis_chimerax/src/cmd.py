@@ -1,5 +1,9 @@
 """
 ChimeraX commands for ISIS epitope prediction.
+
+If commands don't register automatically, run in ChimeraX Python shell:
+    from chimerax.isis.cmd import register_all_commands
+    register_all_commands(session)
 """
 
 from chimerax.core.commands import CmdDesc, register, StringArg, IntArg, FloatArg
