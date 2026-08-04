@@ -4,7 +4,8 @@ B-cell epitope prediction using established amino acid property scales. Predict 
 
 ## Features
 
-- **5 prediction methods** based on peer-reviewed amino acid scales
+- **5 prediction methods** based on peer-reviewed amino acid property scales
+- **Consensus analysis** combining all methods for higher confidence
 - **Python API** for scripting and pipelines
 - **Command-line interface** for batch processing
 - **ChimeraX plugin** for 3D visualization on protein structures
@@ -16,10 +17,6 @@ B-cell epitope prediction using established amino acid property scales. Predict 
 ### Core Library
 
 ```bash
-# From PyPI (when published)
-pip install isis-epitope
-
-# From source
 git clone https://github.com/jrjhealey/ISIS.git
 cd ISIS
 pip install -e .
@@ -41,7 +38,8 @@ The installer will:
 1. Find your ChimeraX installation
 2. Install the ISIS core library into ChimeraX's Python
 3. Install the ChimeraX plugin bundle
-4. Restart ChimeraX to complete
+
+**Restart ChimeraX after installation.**
 
 #### Manual Install
 
@@ -88,31 +86,15 @@ toolshed uninstall ChimeraX-ISIS
 ```python
 from isis import predict, predict_all
 
-# Single method
 result = predict("MKTAYIAKQRQISFVKSHFSRQLE", method="emini")
-print(f"Found {len(result.epitopes)} epitopes")
 for ep in result.epitopes:
-    print(f"  {ep.start}-{ep.end}: {ep.sequence} (score={ep.score:.2f})")
-
-# All methods
-results = predict_all("MKTAYIAKQRQISFVKSHFSRQLE")
-for method, result in results.items():
-    print(f"{method}: {len(result.epitopes)} epitopes")
+    print(f"{ep.start}-{ep.end}: {ep.sequence}")
 ```
 
 ### Command Line
 
 ```bash
-# Basic prediction
 isis predict sequence.fasta
-
-# Multiple methods, CSV output
-isis predict sequence.fasta --methods emini,parker,kolaskar-tongaonkar --format csv
-
-# JSON output for downstream processing  
-isis predict sequence.fasta --format json --output results.json
-
-# List available methods
 isis list-methods
 ```
 
@@ -120,106 +102,192 @@ isis list-methods
 
 ```
 open 1ubq
-isis predict #1
-isis color #1
+isis consensus #1
 ```
 
 ---
 
 ## Prediction Methods
 
-| Method | Property | Default Window | Threshold | Reference |
-|--------|----------|----------------|-----------|-----------|
-| `emini` | Surface accessibility | 6 | 1.0 | Emini et al. 1985 |
-| `parker` | Hydrophilicity | 7 | average | Parker et al. 1986 |
-| `chou-fasman` | Beta-turn propensity | 7 | average | Chou & Fasman 1978 |
-| `kolaskar-tongaonkar` | Antigenicity | 7 | 1.0 | Kolaskar & Tongaonkar 1990 |
-| `karplus-schulz` | Flexibility | 7 | 1.0 | Karplus & Schulz 1985 |
-
-### Method Selection Guide
-
-- **`emini`** - Best for identifying surface-exposed regions. Good starting point.
-- **`parker`** - Hydrophilic regions tend to be antigenic. Complements Emini.
-- **`kolaskar-tongaonkar`** - Semi-empirical, ~75% accuracy on known epitopes.
-- **`chou-fasman`** - Beta-turns are often in loop regions accessible to antibodies.
-- **`karplus-schulz`** - Flexible regions can adapt to antibody binding.
-
-**Recommendation:** Run multiple methods and look for consensus regions.
+| Method | Property | Window | Threshold | Use Case |
+|--------|----------|--------|-----------|----------|
+| `emini` | Surface accessibility | 6 | 1.0 | Surface-exposed regions |
+| `parker` | Hydrophilicity | 7 | average | Hydrophilic/antigenic regions |
+| `chou-fasman` | Beta-turn propensity | 7 | average | Loop regions |
+| `kolaskar-tongaonkar` | Antigenicity | 7 | 1.0 | ~75% accuracy on known epitopes |
+| `karplus-schulz` | Flexibility | 7 | 1.0 | Flexible, accessible regions |
 
 ---
 
-## Python API Reference
+## ChimeraX Commands
 
-### `predict(sequence, method, window_size, threshold, sequence_name)`
+### `isis predict` - Single Method Prediction
 
-Predict epitopes for a single sequence.
+Run epitope prediction using one method. Stores scores as residue attributes.
+
+**Syntax:**
+```
+isis predict <structures> [method <name>] [window <int>] [threshold <float>]
+```
+
+**Examples:**
+```
+# Open a structure first
+open 1ubq
+
+# Default prediction (Emini method)
+isis predict #1
+
+# Specify method
+isis predict #1 method parker
+
+# Custom window size
+isis predict #1 method emini window 9
+
+# Custom threshold (stricter)
+isis predict #1 method kolaskar-tongaonkar threshold 1.2
+
+# Multiple structures
+isis predict #1-3 method emini
+```
+
+---
+
+### `isis consensus` - Multi-Method Consensus
+
+Run ALL methods and create a consensus score (0-5) showing how many methods agree each position is epitopic. Automatically colors the structure.
+
+**Syntax:**
+```
+isis consensus <structures> [min_methods <int>] [min_length <int>]
+```
 
 **Parameters:**
-- `sequence` (str): Amino acid sequence
-- `method` (str): Prediction method (default: "emini")
-- `window_size` (int): Sliding window size (default: method-specific)
-- `threshold` (float): Score threshold for epitope calls (default: method-specific)
-- `sequence_name` (str): Identifier for the sequence
+- `min_methods`: Minimum methods that must agree (default: 2)
+- `min_length`: Minimum epitope length in amino acids (default: 6)
 
-**Returns:** `Prediction` object
+**Examples:**
+```
+open 1ubq
 
-```python
-from isis import predict
+# Basic consensus (all defaults)
+isis consensus #1
 
-result = predict(
-    "MKTAYIAKQRQISFVKSHFSRQLE",
-    method="emini",
-    window_size=7,
-    threshold=1.2
-)
+# Require 3+ methods to agree
+isis consensus #1 min_methods 3
 
-# Access results
-print(result.scores)      # numpy array of scores
-print(result.positions)   # numpy array of positions (1-indexed)
-print(result.threshold)   # threshold used
-print(result.epitopes)    # list of Epitope objects
+# Require longer epitopes (8+ aa)
+isis consensus #1 min_length 8
+
+# Strict consensus
+isis consensus #1 min_methods 4 min_length 8
 ```
 
-### `predict_all(sequence, methods, window_size, sequence_name)`
+**Output:**
+- Colors structure: white(0) → yellow(1-2) → orange(3-4) → red(5)
+- Logs consensus epitopes with sequences and average method agreement
+- If no consensus found with default thresholds, automatically loosens thresholds
 
-Run multiple prediction methods.
+---
 
-```python
-from isis import predict_all
+### `isis color` - Color by Scores
 
-results = predict_all(
-    "MKTAYIAKQRQISFVKSHFSRQLE",
-    methods=["emini", "parker", "kolaskar-tongaonkar"]
-)
+Color structure using a gradient based on prediction scores.
 
-for method, result in results.items():
-    print(f"{method}: {len(result.epitopes)} epitopes")
+**Syntax:**
+```
+isis color <structures> [method <name>] [palette <colors>]
 ```
 
-### `Prediction` Object
+**Palette format:** `low:mid:high` or `low:high`
 
-```python
-result.method          # Method name
-result.sequence        # Input sequence
-result.sequence_name   # Sequence identifier
-result.window_size     # Window size used
-result.threshold       # Threshold used
-result.positions       # numpy array, 1-indexed center positions
-result.scores          # numpy array, per-position scores
-result.epitopes        # List of Epitope objects above threshold
+**Examples:**
+```
+# First run a prediction
+isis predict #1 method emini
 
-result.score_at(10)    # Get score at position 10 (or None)
-result.to_dict()       # Serialize to dictionary
+# Default coloring (white → yellow → red)
+isis color #1
+
+# Specify which method's scores to use
+isis color #1 method emini
+
+# Custom color palette
+isis color #1 palette blue:white:red
+isis color #1 palette white:red
+isis color #1 palette cyan:magenta
+isis color #1 method parker palette green:yellow:red
 ```
 
-### `Epitope` Object
+---
 
-```python
-epitope.start      # Start position (1-indexed)
-epitope.end        # End position (1-indexed, inclusive)
-epitope.sequence   # Amino acid sequence
-epitope.score      # Average score
-epitope.length     # Length of epitope
+### `isis epitopes` - Highlight Epitope Regions
+
+Color only the predicted epitope regions (above threshold), not the full gradient.
+
+**Syntax:**
+```
+isis epitopes <structures> [method <name>] [color <color>]
+```
+
+**Examples:**
+```
+# First run a prediction
+isis predict #1 method emini
+
+# Highlight epitopes in red
+isis epitopes #1 color red
+
+# Different method and color
+isis epitopes #1 method parker color orange
+
+# Hex color
+isis epitopes #1 color #ff6600
+```
+
+---
+
+### `isis list` - List Available Methods
+
+Show all available prediction methods.
+
+**Example:**
+```
+isis list
+```
+
+**Output:**
+```
+Available ISIS prediction methods:
+  emini: Emini Surface Accessibility
+  parker: Parker Hydrophilicity
+  chou-fasman: Chou-Fasman Beta-Turn
+  kolaskar-tongaonkar: Kolaskar-Tongaonkar Antigenicity
+  karplus-schulz: Karplus-Schulz Flexibility
+```
+
+---
+
+### `isis clear` - Remove Predictions
+
+Remove all ISIS prediction attributes from structures.
+
+**Syntax:**
+```
+isis clear <structures>
+```
+
+**Examples:**
+```
+# Clear all ISIS attributes
+isis clear #1
+
+# Clear multiple structures
+isis clear #1-3
+
+# Start fresh
+isis clear #1
+color #1 white
 ```
 
 ---
@@ -235,22 +303,22 @@ Arguments:
   input                 FASTA file or - for stdin
 
 Options:
-  -m, --methods TEXT    Comma-separated methods (default: emini,parker,chou-fasman,kolaskar-tongaonkar)
+  -m, --methods TEXT    Comma-separated methods (default: all)
   -w, --window INT      Window size (default: method-specific)
-  -f, --format TEXT     Output format: table, csv, json, epitopes (default: table)
+  -f, --format TEXT     Output format: table, csv, json, epitopes
   -o, --output FILE     Output file (default: stdout)
 ```
 
 **Examples:**
 
 ```bash
-# Default table output
+# Basic prediction with table output
 isis predict protein.fasta
 
 # Specific methods
 isis predict protein.fasta -m emini,parker
 
-# CSV for spreadsheet
+# CSV output for spreadsheet
 isis predict protein.fasta -f csv -o results.csv
 
 # JSON for programming
@@ -272,397 +340,187 @@ isis predict protein.fasta -w 9
 isis list-methods
 ```
 
-Shows all available methods with descriptions.
-
 ---
 
-## ChimeraX Plugin Reference
+## Python API Reference
 
-### Commands
+### `predict()`
 
-#### `isis predict <structures> [method <name>] [window <int>] [threshold <float>]`
+```python
+from isis import predict
 
-Run epitope prediction on structure sequences. Scores are stored as residue attributes.
+result = predict(
+    sequence,           # Amino acid sequence (str)
+    method="emini",     # Prediction method
+    window_size=None,   # Window size (default: method-specific)
+    threshold=None,     # Score threshold (default: method-specific)
+    sequence_name="Seq" # Identifier
+)
 
-```
-isis predict #1
-isis predict #1 method emini
-isis predict #1 method parker window 9
-isis predict #1 method kolaskar-tongaonkar threshold 1.1
-```
-
-#### `isis color <structures> [method <name>] [palette <colors>]`
-
-Color structure by prediction scores using a gradient.
-
-```
-isis color #1
-isis color #1 method emini
-isis color #1 palette white:yellow:red
-isis color #1 palette blue:white:red
-isis color #1 method parker palette cyan:magenta
+# Access results
+result.scores          # numpy array of per-position scores
+result.positions       # numpy array of positions (1-indexed)
+result.threshold       # threshold used
+result.epitopes        # list of Epitope objects
+result.score_at(10)    # score at position 10
+result.to_dict()       # serialize to dictionary
 ```
 
-**Palette format:** `low:high` or `low:mid:high`
+### `predict_all()`
 
-#### `isis epitopes <structures> [method <name>] [color <color>]`
+```python
+from isis import predict_all
 
-Highlight only the predicted epitope regions.
+results = predict_all(
+    sequence,
+    methods=["emini", "parker"],  # or None for all
+    window_size=None
+)
 
-```
-isis epitopes #1 color red
-isis epitopes #1 method parker color orange
-isis epitopes #1 color #ff6600
-```
-
-#### `isis list`
-
-Show available prediction methods.
-
-```
-isis list
+for method, result in results.items():
+    print(f"{method}: {len(result.epitopes)} epitopes")
 ```
 
-#### `isis consensus <structures> [min_methods <int>] [threshold <float>]`
+### `Epitope` Object
 
-Run ALL methods and create a consensus score (0-5) based on how many methods agree each position is epitopic. Automatically colors the structure.
-
-```
-isis consensus #1
-isis consensus #1 min_methods 3
-isis consensus #1 threshold 1.2
-```
-
-**Scoring:**
-- 0 = no methods predict epitope
-- 1-2 = weak consensus
-- 3-4 = moderate consensus
-- 5 = all methods agree (highest confidence)
-
-**Colors:** white (0) → yellow (1-2) → orange (3-4) → red (5)
-
-#### `isis clear <structures>`
-
-Remove all ISIS prediction attributes from structures.
-
-```
-isis clear #1
-```
-
-### Structure Specifiers
-
-```
-#1              First open model
-#2              Second open model
-#1-3            Models 1, 2, and 3
-#1/A            Chain A of model 1
-#1/A,B          Chains A and B of model 1
+```python
+epitope.start      # Start position (1-indexed)
+epitope.end        # End position (inclusive)
+epitope.sequence   # Amino acid sequence
+epitope.score      # Average score
+epitope.length     # Length
 ```
 
 ---
 
 ## Worked Examples
 
-### Example 1: Analyze a Single Protein
+### Example 1: Quick Consensus Analysis
 
-**Goal:** Find potential B-cell epitopes in ubiquitin.
-
-**Python:**
-```python
-from isis import predict_all
-
-# Ubiquitin sequence
-ubiquitin = """
-MQIFVKTLTGKTITLEVEPSDTIENVKAKIQDKEGIPPDQQRLIFAGKQLEDGRTLSDYNIQ
-KESTLHLVLRLRGG
-"""
-
-results = predict_all(ubiquitin.replace("\n", ""))
-
-print("Predicted epitopes by method:\n")
-for method, result in results.items():
-    print(f"{method}:")
-    if result.epitopes:
-        for ep in result.epitopes:
-            print(f"  {ep.start:3d}-{ep.end:3d}: {ep.sequence}")
-    else:
-        print("  No epitopes above threshold")
-    print()
-```
-
-**CLI:**
-```bash
-echo ">ubiquitin
-MQIFVKTLTGKTITLEVEPSDTIENVKAKIQDKEGIPPDQQRLIFAGKQLEDGRTLSDYNIQ
-KESTLHLVLRLRGG" > ubiquitin.fasta
-
-isis predict ubiquitin.fasta
-```
-
-**ChimeraX:**
 ```
 open 1ubq
-isis predict #1
-isis color #1 palette white:yellow:red
+isis consensus #1
 ```
 
----
-
-### Example 2: Compare Multiple Methods
-
-**Goal:** Find consensus epitope regions across methods.
-
-**Python:**
-```python
-from isis import predict_all
-from collections import defaultdict
-
-sequence = "MKTAYIAKQRQISFVKSHFSRQLEEALCLSLHRALQFGPRVLVVS"
-
-results = predict_all(sequence)
-
-# Count how many methods predict each position as epitopic
-position_votes = defaultdict(int)
-
-for method, result in results.items():
-    for ep in result.epitopes:
-        for pos in range(ep.start, ep.end + 1):
-            position_votes[pos] += 1
-
-# Find consensus regions (predicted by 3+ methods)
-print("Consensus epitope positions (3+ methods):")
-consensus = [pos for pos, votes in position_votes.items() if votes >= 3]
-if consensus:
-    # Group consecutive positions
-    start = consensus[0]
-    for i in range(1, len(consensus)):
-        if consensus[i] != consensus[i-1] + 1:
-            print(f"  {start}-{consensus[i-1]}: {sequence[start-1:consensus[i-1]]}")
-            start = consensus[i]
-    print(f"  {start}-{consensus[-1]}: {sequence[start-1:consensus[-1]]}")
-else:
-    print("  No consensus regions found")
+Output:
+```
+Running consensus analysis on 1ubq...
+  Chain A: Found consensus with threshold multiplier 0.9
+  Chain A: 2 consensus epitope(s)
+    12-18: TITLEVP (avg 3.2 methods)
+    44-52: LEDGRTLSD (avg 2.8 methods)
 ```
 
-**ChimeraX:**
+### Example 2: Compare Individual Methods
+
 ```
 open 3sgb
 
-# Run multiple methods
+# Run each method
 isis predict #1 method emini
-isis predict #1 method parker  
 isis predict #1 method kolaskar-tongaonkar
 
-# View each one
+# View Emini scores
 isis color #1 method emini palette white:blue
-# screenshot ~/emini.png
 
-isis color #1 method parker palette white:green
-# screenshot ~/parker.png
-
+# Switch to Kolaskar
 isis color #1 method kolaskar-tongaonkar palette white:red
-# screenshot ~/kolaskar.png
 ```
 
----
+### Example 3: Surface Visualization
 
-### Example 3: Batch Processing Multiple Sequences
+```
+open 4hhb
 
-**Python:**
-```python
-from isis import predict
-from Bio import SeqIO  # requires biopython
+# Predict and color
+isis consensus #1 min_methods 3
 
-results = []
+# Add transparent surface
+surface #1
+transparency #1 60
 
-for record in SeqIO.parse("proteins.fasta", "fasta"):
-    result = predict(str(record.seq), method="emini", sequence_name=record.id)
-    results.append({
-        "id": record.id,
-        "length": len(record.seq),
-        "n_epitopes": len(result.epitopes),
-        "epitopes": [(ep.start, ep.end, ep.sequence) for ep in result.epitopes]
-    })
-
-# Summary
-for r in results:
-    print(f"{r['id']}: {r['n_epitopes']} epitopes in {r['length']} aa")
+# Save image
+view all
+save ~/epitopes.png supersample 3
 ```
 
-**CLI:**
+### Example 4: Batch Processing (CLI)
+
 ```bash
-# Process all FASTA files in a directory
+# Process all FASTA files
 for f in *.fasta; do
-    echo "=== $f ==="
-    isis predict "$f" -f epitopes
-done > all_epitopes.txt
+    isis predict "$f" -f json -o "${f%.fasta}.json"
+done
 
 # Or with parallel
-ls *.fasta | parallel 'isis predict {} -f json -o {.}.json'
+ls *.fasta | parallel 'isis predict {} -f csv -o {.}.csv'
 ```
 
----
-
-### Example 4: Visualize on Protein Structure
-
-**ChimeraX workflow:**
-
-```
-# 1. Open structure
-open 4hhb  # Hemoglobin
-
-# 2. Predict with stringent threshold
-isis predict #1 method emini threshold 1.3
-
-# 3. Style the structure
-preset cartoons/nucleotides
-color #1 white
-
-# 4. Color epitopes
-isis epitopes #1 color red
-
-# 5. Add surface
-surface #1
-transparency #1 70
-
-# 6. Save image
-view all
-windowsize 1920 1080
-save ~/hemoglobin_epitopes.png supersample 3
-```
-
----
-
-### Example 5: Multi-chain Analysis
-
-**ChimeraX:**
-```
-# Open antibody-antigen complex
-open 1igc
-
-# Predict on all chains
-isis predict #1
-
-# Color each chain differently
-isis color #1/A method emini palette white:red
-isis color #1/B method emini palette white:blue
-
-# Or just highlight epitopes on antigen chain
-isis epitopes #1/A color yellow
-```
-
-**Python:**
-```python
-from isis import predict
-from Bio.PDB import PDBParser
-
-parser = PDBParser(QUIET=True)
-structure = parser.get_structure("complex", "1igc.pdb")
-
-for model in structure:
-    for chain in model:
-        # Build sequence from residues
-        residues = [r for r in chain.get_residues() if r.id[0] == " "]
-        seq = "".join(r.resname[0] if len(r.resname) == 3 else "X" for r in residues)
-        
-        if len(seq) < 10:
-            continue
-            
-        result = predict(seq, method="emini")
-        print(f"\nChain {chain.id} ({len(seq)} aa):")
-        for ep in result.epitopes:
-            print(f"  {ep.start}-{ep.end}: {ep.sequence}")
-```
-
----
-
-### Example 6: Export for External Tools
-
-**JSON export for web visualization:**
-```bash
-isis predict protein.fasta -f json -o epitopes.json
-```
+### Example 5: Python Consensus Analysis
 
 ```python
-import json
+from isis import predict_all, available_methods
+from collections import defaultdict
 
-with open("epitopes.json") as f:
-    data = json.load(f)
+sequence = "MKTAYIAKQRQISFVKSHFSRQLEEALCLSLHR"
+results = predict_all(sequence)
 
-# Access structured data
-for entry in data:
-    seq_name = entry["sequence_name"]
-    for method, pred in entry["predictions"].items():
-        scores = pred["scores"]
-        epitopes = pred["epitopes"]
-        # ... process for visualization
+# Count method agreement per position
+votes = defaultdict(int)
+for method, result in results.items():
+    for ep in result.epitopes:
+        for pos in range(ep.start, ep.end + 1):
+            votes[pos] += 1
+
+# Find consensus positions (3+ methods)
+consensus = [pos for pos, count in votes.items() if count >= 3]
+print(f"Consensus positions: {consensus}")
 ```
-
-**CSV for spreadsheet analysis:**
-```bash
-isis predict protein.fasta -f csv -o epitopes.csv
-```
-
----
-
-## Output Formats
-
-### Table (default)
-Human-readable format with scores and epitope summary.
-
-### CSV
-Spreadsheet-compatible with position, residue, and scores per method.
-
-### JSON
-Structured data including all scores, positions, and epitope details.
-
-### Epitopes
-Compact TSV with only epitope calls: `method start end sequence score`
-
----
-
-## Interpreting Results
-
-### Scores
-- **Emini, Kolaskar-Tongaonkar, Karplus-Schulz:** Values > 1.0 suggest epitope potential
-- **Parker, Chou-Fasman:** Above-average values suggest epitope potential
-
-### Epitopes
-Contiguous regions of 6+ residues above the threshold are reported as epitopes.
-
-### Confidence
-- Single method prediction: Low confidence
-- Multiple methods agree: Higher confidence
-- Consensus across 3+ methods: Highest confidence
-
-### Limitations
-- These are **linear epitope** predictions only
-- Conformational epitopes require 3D structure analysis
-- Predictions are probabilistic, not definitive
-- Experimental validation is always recommended
 
 ---
 
 ## Troubleshooting
 
 ### ChimeraX: "Unknown command: isis"
-1. Ensure the bundle is installed: `toolshed list installed`
+
+1. Ensure bundle is installed: `toolshed list installed`
 2. Restart ChimeraX after installation
 3. Check for errors: `log show`
 
 ### ChimeraX: "ISIS library not installed"
+
 Install ISIS into ChimeraX's Python:
 ```bash
 /Applications/ChimeraX-1.10.app/Contents/bin/python3.11 -m pip install /path/to/ISIS
 ```
 
+### ChimeraX: Commands still not working
+
+Manually register in Python shell (Tools → General → Shell):
+```python
+from chimerax.isis.cmd import register_all_commands
+register_all_commands(session)
+```
+
 ### "Sequence too short"
-Sequences must be at least as long as the window size (typically 6-7 amino acids).
+
+Sequences must be at least 6 amino acids (the minimum epitope length).
 
 ### No epitopes predicted
-- Try a lower threshold: `isis predict #1 threshold 0.8`
-- Try a different method
-- The sequence may genuinely lack strong epitope signals
+
+- The sequence may lack strong epitope signals
+- Try `isis consensus` which auto-loosens thresholds
+- Or manually lower threshold: `isis predict #1 threshold 0.8`
+
+---
+
+## Legacy Code
+
+The original Python 2 / UCSF Chimera code is preserved on the `legacy/v1-python2` branch:
+
+```bash
+git checkout legacy/v1-python2
+```
 
 ---
 
