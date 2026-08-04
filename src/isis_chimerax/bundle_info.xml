@@ -1,0 +1,32 @@
+<BundleInfo name="ChimeraX-ISIS"
+            version="2.0.3"
+            package="chimerax.isis"
+            customInit="true"
+            minSessionVersion="1" maxSessionVersion="1">
+
+  <Author>NanoSyrinx</Author>
+  <Email>support@nanosyrinx.com</Email>
+  <URL>https://github.com/nanosyrinx/isis</URL>
+
+  <Synopsis>B-cell epitope prediction and visualization</Synopsis>
+  <Description>
+ISIS (In Silico Immunogenicity Studies) provides B-cell epitope
+prediction using established amino acid property scales.
+  </Description>
+
+  <Categories>
+    <Category name="Sequence"/>
+    <Category name="Structure Analysis"/>
+  </Categories>
+
+  <Dependencies>
+    <Dependency name="ChimeraX-Core" version=">=1.0"/>
+    <Dependency name="ChimeraX-Atomic" version=">=1.0"/>
+  </Dependencies>
+
+  <Classifiers>
+    <PythonClassifier>Development Status :: 4 - Beta</PythonClassifier>
+    <PythonClassifier>Programming Language :: Python :: 3</PythonClassifier>
+  </Classifiers>
+
+</BundleInfo>
