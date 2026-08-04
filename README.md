@@ -22,7 +22,6 @@ pip install isis-epitope
 # From source
 git clone https://github.com/jrjhealey/ISIS.git
 cd ISIS
-git checkout claude/isis-rewrite
 pip install -e .
 ```
 
