@@ -1,6 +1,6 @@
 <BundleInfo name="ChimeraX-ISIS"
             version="2.0.0"
-            package="isis_chimerax"
+            package="chimerax.isis"
             minSessionVersion="1" maxSessionVersion="1">
 
   <Author>NanoSyrinx</Author>
@@ -30,10 +30,5 @@ prediction using established amino acid property scales.
     <Provider name="isis clear"/>
     <Provider name="isis list"/>
   </Providers>
-
-  <Classifiers>
-    <PythonClassifier>Development Status :: 4 - Beta</PythonClassifier>
-    <PythonClassifier>License :: OSI Approved :: MIT License</PythonClassifier>
-  </Classifiers>
 
 </BundleInfo>
