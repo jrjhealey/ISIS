@@ -117,6 +117,63 @@ def isis_epitopes(session, structures, method="emini", color="red"):
                 session.logger.error(f"Chain {chain_id}: {e}")
 
 
+def isis_consensus(session, structures, min_methods=2, threshold=None):
+    """
+    Run all prediction methods and create consensus score.
+
+    The consensus score is the number of methods (0-5) that predict
+    each position as part of an epitope.
+    """
+    if not ISIS_AVAILABLE:
+        session.logger.error("ISIS library not installed")
+        return
+
+    from chimerax.atomic import Residue
+    from chimerax.core.commands import run
+
+    methods = available_methods()
+    attr_name = f"{ATTR_PREFIX}consensus"
+
+    # Register the attribute
+    if not hasattr(Residue, attr_name):
+        Residue.register_attr(session, attr_name, "ISIS", attr_type=float)
+
+    for structure in structures:
+        session.logger.info(f"Running consensus analysis on {structure.name}...")
+
+        for chain_id, seq, residues in _get_chains(structure):
+            # Count votes per position
+            votes = [0] * len(seq)
+
+            for method in methods:
+                try:
+                    pred = predict(seq, method=method, threshold=threshold)
+                    for epitope in pred.epitopes:
+                        for pos in range(epitope.start, epitope.end + 1):
+                            if 1 <= pos <= len(seq):
+                                votes[pos - 1] += 1
+                except Exception as e:
+                    session.logger.warning(f"  {method} failed: {e}")
+
+            # Store consensus scores
+            consensus_count = 0
+            for i, res in enumerate(residues):
+                if i < len(votes):
+                    score = float(votes[i])
+                    setattr(res, attr_name, score)
+                    if score >= min_methods:
+                        consensus_count += 1
+
+            session.logger.info(f"  Chain {chain_id}: {consensus_count} positions with {min_methods}+ method agreement")
+
+        # Auto-color
+        spec = structure.atomspec
+        run(session, f"color byattribute {attr_name} {spec} palette white:yellow:orange:red")
+
+        session.logger.info(f"Consensus scores stored as: {attr_name}")
+        session.logger.info(f"  0 = no methods, 5 = all methods agree")
+
+
 def isis_clear(session, structures):
     """Remove ISIS prediction attributes."""
     for structure in structures:
@@ -240,6 +297,16 @@ def register_all_commands(session):
 
         desc = CmdDesc(synopsis="List prediction methods")
         reg("isis list", desc, isis_list)
+
+        desc = CmdDesc(
+            required=[("structures", AtomicStructuresArg)],
+            keyword=[
+                ("min_methods", IntArg),
+                ("threshold", FloatArg),
+            ],
+            synopsis="Consensus epitope prediction (all methods)"
+        )
+        reg("isis consensus", desc, isis_consensus)
 
         session.logger.info("ISIS: Commands registered successfully")
 

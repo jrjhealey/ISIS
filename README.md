@@ -323,6 +323,24 @@ Show available prediction methods.
 isis list
 ```
 
+#### `isis consensus <structures> [min_methods <int>] [threshold <float>]`
+
+Run ALL methods and create a consensus score (0-5) based on how many methods agree each position is epitopic. Automatically colors the structure.
+
+```
+isis consensus #1
+isis consensus #1 min_methods 3
+isis consensus #1 threshold 1.2
+```
+
+**Scoring:**
+- 0 = no methods predict epitope
+- 1-2 = weak consensus
+- 3-4 = moderate consensus
+- 5 = all methods agree (highest confidence)
+
+**Colors:** white (0) → yellow (1-2) → orange (3-4) → red (5)
+
 #### `isis clear <structures>`
 
 Remove all ISIS prediction attributes from structures.
