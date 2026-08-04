@@ -1,143 +1,640 @@
-# ISIS
-Nothing to do with the Islamic State; a repository to hold data and workflows for In Silico Immunogenicity Studies based on the tools from IEDB
+# ISIS - In Silico Immunogenicity Studies
 
+B-cell epitope prediction using established amino acid property scales. Predict which regions of a protein are likely to be recognized by antibodies.
 
-# Todo
-- Interface with eCIS database for orthologue clustering analyses
-- Interface with chimera for 3D mapping to protein structures
-- Alignment engine for orthologue alignments and scores on a per amino basis
-- Codon redundancy back translation for optimised sequences.
+## Features
 
-# Installing
-
-First, install UCSF Chimera according to its standard instructions.
-
-**IMPORTANT: all of what follows is PYTHON2 ONLY.**
-
-Install `biopython` in to Chimera:
- - First, find Chimera's own python binary (`which chimera`). Should look something like `/Applications/Chimera.app/Contents/Resources/bin/` (on Mac).
- - Run `/Applications/Chimera.app/Contents/Resources/bin/python2.7 -m pip install biopython`
-  - If `pip` isn't present, try `/Applications/Chimera.app/Contents/Resources/bin/python2.7 -m ensurepip`. Refer to section 3b here for more info: http://www.cgl.ucsf.edu/chimera/docs/ProgrammersGuide/faq.html#q3b.
- - It may try to install `numpy`. This can cause issues with chimera's older module, so if issues are encountered, downgrade numpy, or install without dependencies (`/Applications/Chimera.app/Contents/Resources/bin/python2.7 -m pip install biopython --no-deps`)
-
-
-# Workflow
-The suite contains 2 approaches:
-
- 1. identification of significant peptides and rendering accordingy.
- 2. Calculation of all scores and rendering accordingly.
-
-(2) is still a W.I.P. and accuracy isn't guaranteed. It's also very slow. For the direct detection of significant epitopes however, implementation is reasonably solid now.
-
------
-# Running
-
-*Still a work in progress, much of this will be combined later for simplicity.*
-
-#### Generating sequences
-Since PDBs with missing residues make sequence analysis hard, it is advised to open the model in Chimera first, and export the model chains as they appear in the structure like so, from chimera's commandline:
-
-    runscript /path/to/Chains2Fasta.py /path/to/output.fasta
-
-At the moment, the code can't handle multifastas, so they need to be split. This oneliner can do so (requires BioPython):
-
-    python -c "import sys; from Bio import SeqIO;[SeqIO.write(r,r.description.replace(' ','')+'.fasta', 'fasta') for r in SeqIO.parse(sys.argv[1], 'fasta')];" /path/to/input.fasta
-
-It should convert 'in place' (but won't affect the input file).
-
-*#TODO Split chains to individual files directly.*
-
-#### Generating predictions
-Run the newly created and split files through the predictor.
-
-For one file:
-
-    python2.7 Epitopes.py -i single.fasta -v 0 > single.epi
-
-    # -w is optional (a large w (around 9), will lead to fewer peptides predicted)
-    # -v must be set to 0 when redirecting to a file so as not to contaminate the output (to be fixed in a later version)
-
-For all split files:
-
-    for file in /path/to/files/*.fasta ; do
-        python2.7 Epitopes.py -i ${file} -v 0 > "${file%.*}".epi
-    done
-
-or, using `parallel`:
-
-    ls /path/to/files/*.fasta | parallel 'python2.7 Epitopes.py -i {} -v 0 > {.}.epi'
-
-Both of these approaches will write `.epi` files (which are just lines of python dictionaries) in to the same location as the input file.
-
-# Rendering in UCSF chimera
-First open the structure file you care about (the one that originated the sequences in the first step).
-
-In chimera's commandline:
-
-    runscript /path/to/EpitopeRenderer.py /path/to/file.epi
-
-The code should then run (note this will take a while if you have a lot of chains since its a combinatorial effect).
-
-It will cycle render colours at the end of its execution so you'll know it finished.
-
-# Resource information
-
-## Linear B-Cell epitope prediction
-
-HMMs combined with a propensity scale method that allows for thresholding and scores to be assigned to the antigenicity of a particular sequence.
-
-This tool implements several methods:
-
-## Chou-Fasman
- - Chou PY, Fasman GD. Prediction of the secondary structure of proteins from their amino acid sequence. Adv Enzymol Relat Areas Mol Biol. 1978;47:45-148.
- - http://www.ncbi.nlm.nih.gov/entrez/query.fcgi?cmd=Retrieve&db=pubmed&dopt=Abstract&list_uids=364941
-
-Scale:
-
-| A | C	| D |	E |	F	| G |	H |	I |	K |	L |	M |	N	| P	| Q	| R	| S	| T	| V	| W	| Y |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-|0.66|1.19|1.46|0.74|0.6|1.56|0.95|0.47|1.01|0.59|0.6|1.56|1.52|0.98|0.95|1.43|0.96|0.5|0.96|1.14|
-
-Description: The rationale for predicting turns to predict antibody epitopes is based on the paper by Pellequer et al, Immunology Letters, 36 (1993) 83-99. Instead of implementing the turn scale of that paper which has some non-standard properties, we decided to use the Chou and Fasman scale which is commonly used to predict beta turns as described in the reference link above.
-
-The Chou-Fasman method approximately predicts segments of a protein which are likely to create Beta-turn motifs.
+- **5 prediction methods** based on peer-reviewed amino acid scales
+- **Python API** for scripting and pipelines
+- **Command-line interface** for batch processing
+- **ChimeraX plugin** for 3D visualization on protein structures
 
 ---
 
-## Emini
- - Emini EA, Hughes JV, Perlow DS, Boger J. Induction of hepatitis A virus-neutralizing antibody by a virus-specific synthetic peptide. J Virol. 1985 Sep;55(3):836-9.
- - http://www.ncbi.nlm.nih.gov/entrez/query.fcgi?cmd=Retrieve&db=pubmed&dopt=Abstract&list_uids=2991600
+## Installation
 
-Scale:
+### Core Library
 
-| A |	C |	D |	E |	F |	G |	H |	I |	K |	L |	M |	N |	P |	Q |	R |	S |	T |	V |	W |	Y |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-|0.49|0.26|0.81|0.84|0.42|0.48|0.66|0.34|0.97|0.4|0.48|0.78|0.75|0.84|0.95|0.65|0.7|0.36|0.51|0.76|
+```bash
+# From PyPI (when published)
+pip install isis-epitope
 
-Description: The calculation was based on surface accessibility scale on a product instead of an addition within the window. The accessibility profile was obtained using the formulae Sn = (dn+4+i ) (0.37)-6 where Sn is the surface probability, dn is the fractional surface probability value, and i vary from 1 to 6. A hexapeptide sequence with Sn greater than 1.0 indicates an increased probability for being found on the surface.
+# From source
+git clone https://github.com/jrjhealey/ISIS.git
+cd ISIS
+git checkout claude/isis-rewrite
+pip install -e .
+```
 
-The Emini method predicts likely immunogenic peptides by virtue of their solvent accessibility/surface exposure.
+### ChimeraX Plugin
+
+1. **Install the core library into ChimeraX's Python:**
+
+```bash
+# macOS
+/Applications/ChimeraX-1.10.app/Contents/bin/python3.11 -m pip install /path/to/ISIS
+
+# Linux
+/usr/lib/chimerax/bin/python3 -m pip install /path/to/ISIS
+
+# Windows
+"C:\Program Files\ChimeraX\bin\python.exe" -m pip install C:\path\to\ISIS
+```
+
+2. **Install the ChimeraX bundle:**
+
+In ChimeraX command line:
+```
+devel install /path/to/ISIS/src/isis_chimerax
+```
+
+3. **Restart ChimeraX**
 
 ---
 
-## Karplus-Schulz
+## Quick Start
 
- - Reference: Karplus PA, Schulz GE. Prediction of Chain Flexibility in Proteins - A tool for the Selection of Peptide Antigens. Naturwissenschafren 1985; 72:212-3.
- - https://link.springer.com/article/10.1007/BF01195768
- -
-Description: In this method, flexibility scale based on mobility of protein segments on the basis of the known temperature B factors of the a-carbons of 31 proteins of known structure was constructed. The calculation based on a flexibility scale is similar to classical calculation, except that the center is the first amino acid of the six amino acids window length, and there are three scales for describing flexibility instead of a single one.
+### Python
 
-The Karplus-Schulz method selects potential antigens based on their proposed B-factor flexibilities. Theoretically, more flexible regions are more likely to be solvent exposed and amenable to immune recognition.
+```python
+from isis import predict, predict_all
 
-## Kolaskar-Tongaonkar
+# Single method
+result = predict("MKTAYIAKQRQISFVKSHFSRQLE", method="emini")
+print(f"Found {len(result.epitopes)} epitopes")
+for ep in result.epitopes:
+    print(f"  {ep.start}-{ep.end}: {ep.sequence} (score={ep.score:.2f})")
 
- - Kolaskar AS, Tongaonkar PC. A semi-empirical method for prediction of antigenic determinants on protein antigens. FEBS Lett. 1990 Dec 10;276(1-2):172-4.
- - http://www.ncbi.nlm.nih.gov/entrez/query.fcgi?cmd=Retrieve&db=pubmed&dopt=Abstract&list_uids=2430611
+# All methods
+results = predict_all("MKTAYIAKQRQISFVKSHFSRQLE")
+for method, result in results.items():
+    print(f"{method}: {len(result.epitopes)} epitopes")
+```
 
-Description: A semi-empirical method which makes use of physicochemical properties of amino acid residues and their frequencies of occurrence in experimentally known segmental epitopes was developed to predict antigenic determinants on proteins. Application of this method to a large number of proteins has shown by the authors that the method can predict antigenic determinants with about 75% accuracy which is better than most of the known methods.
+### Command Line
 
-Scale:
+```bash
+# Basic prediction
+isis predict sequence.fasta
 
-| A | C | D | E | F | G | H | I | K | L | M | N | P | Q | R | S | T | V | W | Y |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-|1.064|1.412|0.866|0.851|1.091|0.874|1.105|1.152|0.93|1.25|0.826|0.776|1.064|1.015|0.873|1.012|0.909|1.383|0.893|1.161|
+# Multiple methods, CSV output
+isis predict sequence.fasta --methods emini,parker,kolaskar-tongaonkar --format csv
+
+# JSON output for downstream processing  
+isis predict sequence.fasta --format json --output results.json
+
+# List available methods
+isis list-methods
+```
+
+### ChimeraX
+
+```
+open 1ubq
+isis predict #1
+isis color #1
+```
+
+---
+
+## Prediction Methods
+
+| Method | Property | Default Window | Threshold | Reference |
+|--------|----------|----------------|-----------|-----------|
+| `emini` | Surface accessibility | 6 | 1.0 | Emini et al. 1985 |
+| `parker` | Hydrophilicity | 7 | average | Parker et al. 1986 |
+| `chou-fasman` | Beta-turn propensity | 7 | average | Chou & Fasman 1978 |
+| `kolaskar-tongaonkar` | Antigenicity | 7 | 1.0 | Kolaskar & Tongaonkar 1990 |
+| `karplus-schulz` | Flexibility | 7 | 1.0 | Karplus & Schulz 1985 |
+
+### Method Selection Guide
+
+- **`emini`** - Best for identifying surface-exposed regions. Good starting point.
+- **`parker`** - Hydrophilic regions tend to be antigenic. Complements Emini.
+- **`kolaskar-tongaonkar`** - Semi-empirical, ~75% accuracy on known epitopes.
+- **`chou-fasman`** - Beta-turns are often in loop regions accessible to antibodies.
+- **`karplus-schulz`** - Flexible regions can adapt to antibody binding.
+
+**Recommendation:** Run multiple methods and look for consensus regions.
+
+---
+
+## Python API Reference
+
+### `predict(sequence, method, window_size, threshold, sequence_name)`
+
+Predict epitopes for a single sequence.
+
+**Parameters:**
+- `sequence` (str): Amino acid sequence
+- `method` (str): Prediction method (default: "emini")
+- `window_size` (int): Sliding window size (default: method-specific)
+- `threshold` (float): Score threshold for epitope calls (default: method-specific)
+- `sequence_name` (str): Identifier for the sequence
+
+**Returns:** `Prediction` object
+
+```python
+from isis import predict
+
+result = predict(
+    "MKTAYIAKQRQISFVKSHFSRQLE",
+    method="emini",
+    window_size=7,
+    threshold=1.2
+)
+
+# Access results
+print(result.scores)      # numpy array of scores
+print(result.positions)   # numpy array of positions (1-indexed)
+print(result.threshold)   # threshold used
+print(result.epitopes)    # list of Epitope objects
+```
+
+### `predict_all(sequence, methods, window_size, sequence_name)`
+
+Run multiple prediction methods.
+
+```python
+from isis import predict_all
+
+results = predict_all(
+    "MKTAYIAKQRQISFVKSHFSRQLE",
+    methods=["emini", "parker", "kolaskar-tongaonkar"]
+)
+
+for method, result in results.items():
+    print(f"{method}: {len(result.epitopes)} epitopes")
+```
+
+### `Prediction` Object
+
+```python
+result.method          # Method name
+result.sequence        # Input sequence
+result.sequence_name   # Sequence identifier
+result.window_size     # Window size used
+result.threshold       # Threshold used
+result.positions       # numpy array, 1-indexed center positions
+result.scores          # numpy array, per-position scores
+result.epitopes        # List of Epitope objects above threshold
+
+result.score_at(10)    # Get score at position 10 (or None)
+result.to_dict()       # Serialize to dictionary
+```
+
+### `Epitope` Object
+
+```python
+epitope.start      # Start position (1-indexed)
+epitope.end        # End position (1-indexed, inclusive)
+epitope.sequence   # Amino acid sequence
+epitope.score      # Average score
+epitope.length     # Length of epitope
+```
+
+---
+
+## Command Line Reference
+
+### `isis predict`
+
+```bash
+isis predict <input> [options]
+
+Arguments:
+  input                 FASTA file or - for stdin
+
+Options:
+  -m, --methods TEXT    Comma-separated methods (default: emini,parker,chou-fasman,kolaskar-tongaonkar)
+  -w, --window INT      Window size (default: method-specific)
+  -f, --format TEXT     Output format: table, csv, json, epitopes (default: table)
+  -o, --output FILE     Output file (default: stdout)
+```
+
+**Examples:**
+
+```bash
+# Default table output
+isis predict protein.fasta
+
+# Specific methods
+isis predict protein.fasta -m emini,parker
+
+# CSV for spreadsheet
+isis predict protein.fasta -f csv -o results.csv
+
+# JSON for programming
+isis predict protein.fasta -f json -o results.json
+
+# Compact epitope-only output
+isis predict protein.fasta -f epitopes
+
+# From stdin
+cat protein.fasta | isis predict -
+
+# Custom window size
+isis predict protein.fasta -w 9
+```
+
+### `isis list-methods`
+
+```bash
+isis list-methods
+```
+
+Shows all available methods with descriptions.
+
+---
+
+## ChimeraX Plugin Reference
+
+### Commands
+
+#### `isis predict <structures> [method <name>] [window <int>] [threshold <float>]`
+
+Run epitope prediction on structure sequences. Scores are stored as residue attributes.
+
+```
+isis predict #1
+isis predict #1 method emini
+isis predict #1 method parker window 9
+isis predict #1 method kolaskar-tongaonkar threshold 1.1
+```
+
+#### `isis color <structures> [method <name>] [palette <colors>]`
+
+Color structure by prediction scores using a gradient.
+
+```
+isis color #1
+isis color #1 method emini
+isis color #1 palette white:yellow:red
+isis color #1 palette blue:white:red
+isis color #1 method parker palette cyan:magenta
+```
+
+**Palette format:** `low:high` or `low:mid:high`
+
+#### `isis epitopes <structures> [method <name>] [color <color>]`
+
+Highlight only the predicted epitope regions.
+
+```
+isis epitopes #1 color red
+isis epitopes #1 method parker color orange
+isis epitopes #1 color #ff6600
+```
+
+#### `isis list`
+
+Show available prediction methods.
+
+```
+isis list
+```
+
+#### `isis clear <structures>`
+
+Remove all ISIS prediction attributes from structures.
+
+```
+isis clear #1
+```
+
+### Structure Specifiers
+
+```
+#1              First open model
+#2              Second open model
+#1-3            Models 1, 2, and 3
+#1/A            Chain A of model 1
+#1/A,B          Chains A and B of model 1
+```
+
+---
+
+## Worked Examples
+
+### Example 1: Analyze a Single Protein
+
+**Goal:** Find potential B-cell epitopes in ubiquitin.
+
+**Python:**
+```python
+from isis import predict_all
+
+# Ubiquitin sequence
+ubiquitin = """
+MQIFVKTLTGKTITLEVEPSDTIENVKAKIQDKEGIPPDQQRLIFAGKQLEDGRTLSDYNIQ
+KESTLHLVLRLRGG
+"""
+
+results = predict_all(ubiquitin.replace("\n", ""))
+
+print("Predicted epitopes by method:\n")
+for method, result in results.items():
+    print(f"{method}:")
+    if result.epitopes:
+        for ep in result.epitopes:
+            print(f"  {ep.start:3d}-{ep.end:3d}: {ep.sequence}")
+    else:
+        print("  No epitopes above threshold")
+    print()
+```
+
+**CLI:**
+```bash
+echo ">ubiquitin
+MQIFVKTLTGKTITLEVEPSDTIENVKAKIQDKEGIPPDQQRLIFAGKQLEDGRTLSDYNIQ
+KESTLHLVLRLRGG" > ubiquitin.fasta
+
+isis predict ubiquitin.fasta
+```
+
+**ChimeraX:**
+```
+open 1ubq
+isis predict #1
+isis color #1 palette white:yellow:red
+```
+
+---
+
+### Example 2: Compare Multiple Methods
+
+**Goal:** Find consensus epitope regions across methods.
+
+**Python:**
+```python
+from isis import predict_all
+from collections import defaultdict
+
+sequence = "MKTAYIAKQRQISFVKSHFSRQLEEALCLSLHRALQFGPRVLVVS"
+
+results = predict_all(sequence)
+
+# Count how many methods predict each position as epitopic
+position_votes = defaultdict(int)
+
+for method, result in results.items():
+    for ep in result.epitopes:
+        for pos in range(ep.start, ep.end + 1):
+            position_votes[pos] += 1
+
+# Find consensus regions (predicted by 3+ methods)
+print("Consensus epitope positions (3+ methods):")
+consensus = [pos for pos, votes in position_votes.items() if votes >= 3]
+if consensus:
+    # Group consecutive positions
+    start = consensus[0]
+    for i in range(1, len(consensus)):
+        if consensus[i] != consensus[i-1] + 1:
+            print(f"  {start}-{consensus[i-1]}: {sequence[start-1:consensus[i-1]]}")
+            start = consensus[i]
+    print(f"  {start}-{consensus[-1]}: {sequence[start-1:consensus[-1]]}")
+else:
+    print("  No consensus regions found")
+```
+
+**ChimeraX:**
+```
+open 3sgb
+
+# Run multiple methods
+isis predict #1 method emini
+isis predict #1 method parker  
+isis predict #1 method kolaskar-tongaonkar
+
+# View each one
+isis color #1 method emini palette white:blue
+# screenshot ~/emini.png
+
+isis color #1 method parker palette white:green
+# screenshot ~/parker.png
+
+isis color #1 method kolaskar-tongaonkar palette white:red
+# screenshot ~/kolaskar.png
+```
+
+---
+
+### Example 3: Batch Processing Multiple Sequences
+
+**Python:**
+```python
+from isis import predict
+from Bio import SeqIO  # requires biopython
+
+results = []
+
+for record in SeqIO.parse("proteins.fasta", "fasta"):
+    result = predict(str(record.seq), method="emini", sequence_name=record.id)
+    results.append({
+        "id": record.id,
+        "length": len(record.seq),
+        "n_epitopes": len(result.epitopes),
+        "epitopes": [(ep.start, ep.end, ep.sequence) for ep in result.epitopes]
+    })
+
+# Summary
+for r in results:
+    print(f"{r['id']}: {r['n_epitopes']} epitopes in {r['length']} aa")
+```
+
+**CLI:**
+```bash
+# Process all FASTA files in a directory
+for f in *.fasta; do
+    echo "=== $f ==="
+    isis predict "$f" -f epitopes
+done > all_epitopes.txt
+
+# Or with parallel
+ls *.fasta | parallel 'isis predict {} -f json -o {.}.json'
+```
+
+---
+
+### Example 4: Visualize on Protein Structure
+
+**ChimeraX workflow:**
+
+```
+# 1. Open structure
+open 4hhb  # Hemoglobin
+
+# 2. Predict with stringent threshold
+isis predict #1 method emini threshold 1.3
+
+# 3. Style the structure
+preset cartoons/nucleotides
+color #1 white
+
+# 4. Color epitopes
+isis epitopes #1 color red
+
+# 5. Add surface
+surface #1
+transparency #1 70
+
+# 6. Save image
+view all
+windowsize 1920 1080
+save ~/hemoglobin_epitopes.png supersample 3
+```
+
+---
+
+### Example 5: Multi-chain Analysis
+
+**ChimeraX:**
+```
+# Open antibody-antigen complex
+open 1igc
+
+# Predict on all chains
+isis predict #1
+
+# Color each chain differently
+isis color #1/A method emini palette white:red
+isis color #1/B method emini palette white:blue
+
+# Or just highlight epitopes on antigen chain
+isis epitopes #1/A color yellow
+```
+
+**Python:**
+```python
+from isis import predict
+from Bio.PDB import PDBParser
+
+parser = PDBParser(QUIET=True)
+structure = parser.get_structure("complex", "1igc.pdb")
+
+for model in structure:
+    for chain in model:
+        # Build sequence from residues
+        residues = [r for r in chain.get_residues() if r.id[0] == " "]
+        seq = "".join(r.resname[0] if len(r.resname) == 3 else "X" for r in residues)
+        
+        if len(seq) < 10:
+            continue
+            
+        result = predict(seq, method="emini")
+        print(f"\nChain {chain.id} ({len(seq)} aa):")
+        for ep in result.epitopes:
+            print(f"  {ep.start}-{ep.end}: {ep.sequence}")
+```
+
+---
+
+### Example 6: Export for External Tools
+
+**JSON export for web visualization:**
+```bash
+isis predict protein.fasta -f json -o epitopes.json
+```
+
+```python
+import json
+
+with open("epitopes.json") as f:
+    data = json.load(f)
+
+# Access structured data
+for entry in data:
+    seq_name = entry["sequence_name"]
+    for method, pred in entry["predictions"].items():
+        scores = pred["scores"]
+        epitopes = pred["epitopes"]
+        # ... process for visualization
+```
+
+**CSV for spreadsheet analysis:**
+```bash
+isis predict protein.fasta -f csv -o epitopes.csv
+```
+
+---
+
+## Output Formats
+
+### Table (default)
+Human-readable format with scores and epitope summary.
+
+### CSV
+Spreadsheet-compatible with position, residue, and scores per method.
+
+### JSON
+Structured data including all scores, positions, and epitope details.
+
+### Epitopes
+Compact TSV with only epitope calls: `method start end sequence score`
+
+---
+
+## Interpreting Results
+
+### Scores
+- **Emini, Kolaskar-Tongaonkar, Karplus-Schulz:** Values > 1.0 suggest epitope potential
+- **Parker, Chou-Fasman:** Above-average values suggest epitope potential
+
+### Epitopes
+Contiguous regions of 6+ residues above the threshold are reported as epitopes.
+
+### Confidence
+- Single method prediction: Low confidence
+- Multiple methods agree: Higher confidence
+- Consensus across 3+ methods: Highest confidence
+
+### Limitations
+- These are **linear epitope** predictions only
+- Conformational epitopes require 3D structure analysis
+- Predictions are probabilistic, not definitive
+- Experimental validation is always recommended
+
+---
+
+## Troubleshooting
+
+### ChimeraX: "Unknown command: isis"
+1. Ensure the bundle is installed: `toolshed list installed`
+2. Restart ChimeraX after installation
+3. Check for errors: `log show`
+
+### ChimeraX: "ISIS library not installed"
+Install ISIS into ChimeraX's Python:
+```bash
+/Applications/ChimeraX-1.10.app/Contents/bin/python3.11 -m pip install /path/to/ISIS
+```
+
+### "Sequence too short"
+Sequences must be at least as long as the window size (typically 6-7 amino acids).
+
+### No epitopes predicted
+- Try a lower threshold: `isis predict #1 threshold 0.8`
+- Try a different method
+- The sequence may genuinely lack strong epitope signals
+
+---
+
+## Citation
+
+If you use ISIS in your research, please cite the original method papers:
+
+- **Emini:** Emini EA et al. J Virol. 1985;55(3):836-839
+- **Parker:** Parker JM et al. Biochemistry. 1986;25(19):5425-5432
+- **Chou-Fasman:** Chou PY, Fasman GD. Adv Enzymol. 1978;47:45-148
+- **Kolaskar-Tongaonkar:** Kolaskar AS, Tongaonkar PC. FEBS Lett. 1990;276(1-2):172-174
+- **Karplus-Schulz:** Karplus PA, Schulz GE. Naturwissenschaften. 1985;72:212-213
+
+---
+
+## License
+
+MIT License
+
+## Contributing
+
+Issues and pull requests welcome at https://github.com/jrjhealey/ISIS
