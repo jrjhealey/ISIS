@@ -4,6 +4,9 @@ Amino acid property scales for B-cell epitope prediction.
 These scales are published, peer-reviewed values from immunology literature.
 Each scale assigns a numeric property value to each of the 20 standard amino acids.
 """
+from __future__ import annotations
+
+from typing import Dict
 
 AMINO_ACIDS = "ACDEFGHIKLMNPQRSTVWY"
 
@@ -109,7 +112,7 @@ METHOD_INFO = {
 }
 
 
-def get_scale(method: str) -> dict[str, float]:
+def get_scale(method: str) -> Dict[str, float]:
     """Get amino acid scale by method name (case-insensitive)."""
     key = method.lower().replace("_", "-")
     if key not in SCALES:

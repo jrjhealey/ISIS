@@ -8,17 +8,19 @@ Usage:
     isis predict sequence.fasta --output results.csv
     isis list-methods
 """
+from __future__ import annotations
 
 import argparse
 import csv
 import json
 import sys
 from pathlib import Path
+from typing import List, Tuple
 
 from . import predict, predict_all, available_methods, __version__
 
 
-def parse_fasta(text: str) -> list[tuple[str, str]]:
+def parse_fasta(text: str) -> List[Tuple[str, str]]:
     """Parse FASTA format, return list of (name, sequence) tuples."""
     sequences = []
     current_name = None

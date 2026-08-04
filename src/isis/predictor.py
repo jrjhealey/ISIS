@@ -4,9 +4,10 @@ Core B-cell epitope prediction engine.
 Uses amino acid property scales with sliding window averaging
 to predict immunogenic regions of protein sequences.
 """
+from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterator
+from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from .scales import get_scale, get_method_info, SCALES
@@ -38,10 +39,10 @@ class Prediction:
     positions: np.ndarray       # 1-indexed center positions
     scores: np.ndarray          # Per-position scores
     threshold: float
-    _epitopes: list[Epitope] = field(default_factory=list, repr=False)
+    _epitopes: List[Epitope] = field(default_factory=list, repr=False)
 
     @property
-    def epitopes(self) -> list[Epitope]:
+    def epitopes(self) -> List[Epitope]:
         """Extract contiguous above-threshold regions as epitopes."""
         if self._epitopes:
             return self._epitopes
@@ -71,7 +72,7 @@ class Prediction:
             ],
         }
 
-    def score_at(self, position: int) -> float | None:
+    def score_at(self, position: int) -> Optional[float]:
         """Get score at a 1-indexed position, or None if outside scored region."""
         idx = np.where(self.positions == position)[0]
         if len(idx) == 0:
@@ -85,7 +86,7 @@ def extract_epitopes(
     scores: np.ndarray,
     threshold: float,
     min_length: int = 6
-) -> list[Epitope]:
+) -> List[Epitope]:
     """Extract contiguous above-threshold regions."""
     epitopes = []
     above = scores >= threshold
@@ -125,8 +126,8 @@ def extract_epitopes(
 def predict(
     sequence: str,
     method: str = "emini",
-    window_size: int | None = None,
-    threshold: float | None = None,
+    window_size: Optional[int] = None,
+    threshold: Optional[float] = None,
     sequence_name: str = "Sequence",
 ) -> Prediction:
     """
@@ -178,9 +179,9 @@ def predict(
 
 def _linear_average(
     sequence: str,
-    scale: dict[str, float],
+    scale: Dict[str, float],
     window_size: int
-) -> tuple[np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray]:
     """Compute sliding window average of scale values."""
     values = np.array([scale.get(aa, 0.0) for aa in sequence])
 
@@ -197,9 +198,9 @@ def _linear_average(
 
 def _emini_score(
     sequence: str,
-    scale: dict[str, float],
+    scale: Dict[str, float],
     window_size: int
-) -> tuple[np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray]:
     """Compute Emini surface accessibility score (product-based)."""
     values = np.array([scale.get(aa, 1.0) for aa in sequence])
 
@@ -225,10 +226,10 @@ def _emini_score(
 
 def predict_all(
     sequence: str,
-    methods: list[str] | None = None,
-    window_size: int | None = None,
+    methods: Optional[List[str]] = None,
+    window_size: Optional[int] = None,
     sequence_name: str = "Sequence",
-) -> dict[str, Prediction]:
+) -> Dict[str, Prediction]:
     """
     Run all (or specified) prediction methods on a sequence.
 
@@ -243,6 +244,6 @@ def predict_all(
     }
 
 
-def available_methods() -> list[str]:
+def available_methods() -> List[str]:
     """List available prediction methods."""
     return list(SCALES.keys())
