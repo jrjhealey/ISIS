@@ -13,7 +13,6 @@ except ImportError:
     ISIS_AVAILABLE = False
 
 ATTR_PREFIX = "isis_"
-METHOD_CHOICES = ["emini", "parker", "chou-fasman", "kolaskar-tongaonkar", "karplus-schulz"]
 
 
 def _get_chains(structure):
@@ -129,14 +128,15 @@ def isis_list(session):
         session.logger.error("ISIS library not installed")
         return
 
-    session.logger.info("Available ISIS prediction methods:\n")
+    session.logger.info("Available ISIS prediction methods:")
     for method in available_methods():
         info = METHOD_INFO[method]
         session.logger.info(f"  {method}: {info['name']}")
 
 
-def register_command(command_name, logger):
+def register_command(session, command_name):
     """Register a single ISIS command."""
+    logger = session.logger
 
     if command_name == "isis predict":
         desc = CmdDesc(
