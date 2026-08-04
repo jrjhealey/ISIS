@@ -33,9 +33,9 @@ except ImportError:
 # Column indices in IEDB mhc_ligand_full.csv (0-indexed)
 COL_PEPTIDE = 11          # Epitope Name (peptide sequence)
 COL_MHC_ALLELE = 107      # MHC Allele Name
-COL_QUANT_MEASURE = 97    # Quantitative measurement (IC50)
-COL_QUAL_MEASURE = 95     # Qualitative Measurement
-COL_MEASURE_INEQ = 96     # Measurement inequality (<, >, =)
+COL_QUANT_MEASURE = 96    # Quantitative measurement (IC50) - was 97, fixed to 96
+COL_QUAL_MEASURE = 94     # Qualitative Measurement
+COL_MEASURE_INEQ = 95     # Measurement inequality (<, >, =)
 COL_ASSAY_TYPE = 91       # Method/Assay type
 
 
