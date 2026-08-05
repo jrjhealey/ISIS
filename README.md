@@ -35,26 +35,44 @@ you hit it, **`isis doctor`** prints the state and the exact repair command.
 
 ### For the ChimeraX plugin
 
-From the ChimeraX command line:
-
-```
-pip install isis-epitope upgrade true
-```
-
-then install the plugin from a clone:
-
-```
-devel install /path/to/ISIS/src/isis_chimerax
+```bash
+git clone https://github.com/jrjhealey/ISIS.git
+cd ISIS
+./install_chimerax.sh
 ```
 
-Confirm with:
+The script installs the library into ChimeraX's Python **with the `[ml,plot]`
+extras**, force-reinstalls the bundle, then verifies by running `isis doctor` and
+printing what ChimeraX actually sees. It exits non-zero if verification fails, so
+a failed install cannot look like a successful one.
+
+If ChimeraX is somewhere unusual, or you have more than one installed:
+
+```bash
+CHIMERAX_PYTHON_OVERRIDE=/Applications/ChimeraX.app/Contents/bin/python3.11 ./install_chimerax.sh
+CHIMERAX_PYTHON_OVERRIDE=/usr/lib/ucsf-chimerax/bin/python3.11 ./install_chimerax.sh
+```
+
+**Restart ChimeraX afterwards**, then confirm:
 
 ```
 isis doctor
 ```
 
-which should report `Core library : isis-epitope 2.1.0` or newer and every
-component `OK`.
+Every component should read `OK` and the core library `2.1.0` or newer.
+
+#### Why not just `devel install`?
+
+`devel install` (and `toolshed install ... reinstall true`) **refuse to replace a
+bundle already installed at the same version** -- they stop at "already installed
+with the same version" and leave the previous code running while reporting
+success. If you are iterating on the plugin, or reinstalling after a change that
+did not bump the version, use the script, or force it yourself:
+
+```bash
+/path/to/chimerax/bin/python3.11 -m pip install --force-reinstall --no-deps \
+    src/isis_chimerax/dist/chimerax_isis-*.whl
+```
 
 ### For CLI / Python use only
 
@@ -83,7 +101,8 @@ devel install /path/to/ISIS/src/isis_chimerax
 |---|---|---|
 | `isis list` shows only the 5 linear scales | old `isis-epitope` without the methods module | `pip install isis-epitope upgrade true` |
 | Everything `UNAVAILABLE` | `isis-epitope` not in ChimeraX's Python | same as above |
-| Toolshed shows an old version | stale plugin | reinstall with `devel install` |
+| Toolshed shows an old version | `devel install` refuses same-version replacement | re-run `./install_chimerax.sh` |
+| Installer said OK but nothing changed | same-version bundle not replaced (fixed in 2.1.0) | re-run `./install_chimerax.sh` |
 | `isis plot` says matplotlib missing | no matplotlib in ChimeraX's Python | `pip install matplotlib` |
 
 Run `isis doctor` first in every case -- it names the problem and the command.

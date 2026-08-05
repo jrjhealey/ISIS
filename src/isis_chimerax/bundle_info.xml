@@ -50,12 +50,13 @@ Requires the isis-epitope Python package in ChimeraX's own Python. Run
   <Dependencies>
     <Dependency name="ChimeraX-Core" version=">=1.0"/>
     <Dependency name="ChimeraX-Atomic" version=">=1.0"/>
-    <!-- The prediction code lives in the isis-epitope package. Declaring it here
-         means installing or upgrading this bundle also installs/upgrades the
-         library into ChimeraX's own Python. Without this the bundle installs
-         happily against a stale core and every non-linear method silently
-         reports itself missing. -->
-    <Dependency name="isis-epitope" version=">=2.1"/>
+    <!-- isis-epitope (the prediction library) is deliberately NOT declared as a
+         Dependency here. It is not published on PyPI, so pip cannot resolve it
+         and declaring it makes `devel install` fail outright with "No matching
+         distribution found" - worse than the problem it was meant to solve.
+         Instead the bundle checks the core's version at run time (see cmd.py)
+         and `isis doctor` reports how to install it. If isis-epitope is ever
+         published, add the dependency back here. -->
   </Dependencies>
 
   <Classifiers>

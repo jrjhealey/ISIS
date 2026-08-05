@@ -1166,7 +1166,8 @@ def isis_doctor(session):
 
     log("ISIS installation report")
     log("")
-    log(f"  ChimeraX Python : {_sys.executable}")
+    log(f"  ChimeraX Python : {_chimerax_python()}")
+    log(f"  Launcher        : {_sys.executable}")
     log(f"  Python version  : {_sys.version.split()[0]}")
     log("  Bundle          : ChimeraX-ISIS (this plugin)")
     log(f"  Core library    : isis-epitope {CORE_VERSION or 'NOT FOUND'}")

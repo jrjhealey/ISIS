@@ -25,7 +25,10 @@ def install_core_library(script_dir):
     """Install the ISIS core library."""
     print("[INFO] Installing ISIS core library...")
     result = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "--upgrade", str(script_dir)],
+        # [ml,plot] extras: without them the MHC models cannot load and
+        # `isis plot` is unavailable, giving a working-looking but crippled install.
+        [sys.executable, "-m", "pip", "install", "--upgrade",
+         f"{script_dir}[ml,plot]"],
         capture_output=True,
         text=True
     )
