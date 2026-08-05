@@ -6,6 +6,7 @@ Usage:
     isis predict sequence.fasta
     isis predict sequence.fasta --methods emini,parker --window 7
     isis predict sequence.fasta --output results.csv
+    isis plot sequence.fasta --outdir figures/
     isis list-methods
 """
 from __future__ import annotations
@@ -187,6 +188,61 @@ def output_epitopes(results, output_path):
         print(output)
 
 
+def cmd_plot(args):
+    """Render prediction figures for each input sequence."""
+    try:
+        from . import plotting
+    except ImportError as exc:  # matplotlib is an optional extra
+        print(f"Error: plotting requires matplotlib ({exc})", file=sys.stderr)
+        print("Install with: pip install 'isis-epitope[plot]'", file=sys.stderr)
+        sys.exit(1)
+
+    import numpy as np
+
+    if args.input == "-":
+        text = sys.stdin.read()
+    else:
+        text = Path(args.input).read_text()
+
+    sequences = parse_fasta(text)
+    if not sequences:
+        print("Error: No sequences found in input", file=sys.stderr)
+        sys.exit(1)
+
+    methods = ([m.strip() for m in args.methods.split(",")]
+               if args.methods else list(available_methods()))
+
+    outdir = Path(args.outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    for name, seq in sequences:
+        slug = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)[:60] or "sequence"
+        results = {m: predict(seq, method=m, window_size=args.window) for m in methods}
+
+        written = [
+            plotting.save_figure(
+                plotting.plot_profile(seq, results,
+                                      subtitle=f"{name} · {len(seq)} residues"),
+                str(outdir / f"{slug}_profile.png")),
+            plotting.save_figure(
+                plotting.plot_call_matrix(seq, results),
+                str(outdir / f"{slug}_calls.png")),
+        ]
+
+        votes = np.zeros(len(seq))
+        for res in results.values():
+            for ep in res.epitopes:
+                votes[ep.start - 1:ep.end] += 1
+        written.append(plotting.save_figure(
+            plotting.plot_consensus(seq, votes,
+                                    min_methods=args.min_methods,
+                                    n_methods=len(results)),
+            str(outdir / f"{slug}_consensus.png")))
+
+        for path in written:
+            print(path)
+
+
 def cmd_list_methods(args):
     """List available prediction methods."""
     from .scales import METHOD_INFO
@@ -233,6 +289,31 @@ def main():
         help="Output file (default: stdout)"
     )
     pred_parser.set_defaults(func=cmd_predict)
+
+    # plot command
+    plot_parser = subparsers.add_parser("plot", help="Render prediction figures")
+    plot_parser.add_argument("input", help="Input FASTA file (or - for stdin)")
+    plot_parser.add_argument(
+        "-m", "--methods",
+        help="Comma-separated methods (default: all available)"
+    )
+    plot_parser.add_argument(
+        "-w", "--window",
+        type=int,
+        help="Window size (default: method-specific)"
+    )
+    plot_parser.add_argument(
+        "--min-methods",
+        type=int,
+        default=3,
+        help="Consensus threshold, methods in agreement (default: 3)"
+    )
+    plot_parser.add_argument(
+        "-o", "--outdir",
+        default=".",
+        help="Directory for output figures (default: current directory)"
+    )
+    plot_parser.set_defaults(func=cmd_plot)
 
     # list-methods command
     list_parser = subparsers.add_parser("list-methods", help="List available methods")

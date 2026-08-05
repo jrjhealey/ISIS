@@ -48,6 +48,9 @@ ml = [
     "scikit-learn>=1.0",
     "joblib>=1.0",
 ]
+plot = [
+    "matplotlib>=3.5",
+]
 chimerax = [
     # ChimeraX dependencies are handled by ChimeraX itself
 ]

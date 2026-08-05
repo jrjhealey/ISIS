@@ -7,7 +7,6 @@ sys.path.insert(0, '/home/user/ISIS/src')
 
 import json
 import numpy as np
-import matplotlib.pyplot as plt
 from collections import defaultdict
 import os
 
@@ -172,150 +171,53 @@ for method in METHODS:
     print(f"{method:<22} {sens:>8.3f} {spec:>8.3f} {ppv:>8.3f} {f1:>8.3f} {mcc:>8.3f}")
 
 # ============================================================================
-# FIGURE 1: Threshold sweep + method comparison
+# FIGURES - all styling comes from isis.plotting so these match the figures
+# produced for individual sequences (same palette, axes, fonts, spacing).
 # ============================================================================
-fig, axes = plt.subplots(2, 2, figsize=(15, 11))
+from isis import plotting as P
+
+SUB = (f"{len(all_results)} antigens · "
+       f"{sum(r['seq_len'] for r in all_results):,} residues · "
+       f"IEDB-confirmed epitope positions")
 
 thresholds = [1, 2, 3, 4, 5]
-avg_sens = [np.mean([r['threshold_results'][t]['sens'] for r in all_results]) for t in thresholds]
-avg_spec = [np.mean([r['threshold_results'][t]['spec'] for r in all_results]) for t in thresholds]
-avg_ppv = [np.mean([r['threshold_results'][t]['ppv'] for r in all_results]) for t in thresholds]
-avg_f1 = [np.mean([r['threshold_results'][t]['f1'] for r in all_results]) for t in thresholds]
-avg_mcc = [np.mean([r['threshold_results'][t]['mcc'] for r in all_results]) for t in thresholds]
-
-ax = axes[0, 0]
-ax.plot(thresholds, avg_sens, 'g-o', label='Sensitivity (TPR)', linewidth=2, markersize=8)
-ax.plot(thresholds, avg_spec, 'b-s', label='Specificity', linewidth=2, markersize=8)
-ax.plot(thresholds, avg_ppv, 'orange', marker='^', label='PPV', linewidth=2, markersize=8)
-ax.plot(thresholds, avg_f1, 'r-d', label='F1', linewidth=2, markersize=8)
-ax.plot(thresholds, avg_mcc, 'purple', marker='*', label='MCC', linewidth=2, markersize=10)
-ax.set_xlabel('B-cell Consensus Threshold (methods agreeing)')
-ax.set_ylabel('Score')
-ax.set_title(f'Threshold Sweep — N={len(all_results)} antigens (real IEDB ground truth)')
-ax.legend()
-ax.set_xticks(thresholds)
-ax.grid(True, alpha=0.3)
-ax.set_ylim(0, 1)
-
-ax = axes[0, 1]
-method_names = list(METHODS)
-m_sens = [np.mean([p['sens'] for p in method_perf[m]]) for m in method_names]
-m_spec = [np.mean([p['spec'] for p in method_perf[m]]) for m in method_names]
-m_f1 = [np.mean([p['f1'] for p in method_perf[m]]) for m in method_names]
-
-x = np.arange(len(method_names))
-width = 0.25
-ax.bar(x - width, m_sens, width, label='Sensitivity', color='green')
-ax.bar(x, m_spec, width, label='Specificity', color='blue')
-ax.bar(x + width, m_f1, width, label='F1', color='red')
-ax.set_xticks(x)
-ax.set_xticklabels(method_names, rotation=30, ha='right')
-ax.set_ylabel('Score')
-ax.set_title('Individual B-cell Method Performance (N=49)')
-ax.legend()
-ax.set_ylim(0, 1)
-
-ax = axes[1, 0]
-sens3 = [r['threshold_results'][3]['sens'] for r in all_results]
-spec3 = [r['threshold_results'][3]['spec'] for r in all_results]
-ax.scatter(spec3, sens3, alpha=0.6, s=60, c='steelblue', edgecolor='black')
-ax.plot([0, 1], [1, 0], 'k--', alpha=0.3, label='Random')
-ax.set_xlabel('Specificity')
-ax.set_ylabel('Sensitivity')
-ax.set_title('Per-Antigen Sens/Spec Distribution (Threshold=3)')
-ax.legend()
-ax.set_xlim(0, 1)
-ax.set_ylim(0, 1)
-ax.grid(True, alpha=0.3)
-
-ax = axes[1, 1]
-f1_dist = [r['threshold_results'][3]['f1'] for r in all_results]
-ax.hist(f1_dist, bins=15, color='coral', edgecolor='black', alpha=0.8)
-ax.axvline(np.mean(f1_dist), color='red', linestyle='--', linewidth=2,
-           label=f'Mean={np.mean(f1_dist):.3f}')
-ax.axvline(np.median(f1_dist), color='blue', linestyle='--', linewidth=2,
-           label=f'Median={np.median(f1_dist):.3f}')
-ax.set_xlabel('F1 Score')
-ax.set_ylabel('Number of Antigens')
-ax.set_title('F1 Score Distribution Across 49 Antigens')
-ax.legend()
-
-plt.tight_layout()
-plt.savefig('benchmark/output/summary_threshold_sweep.png', dpi=150, bbox_inches='tight')
-print("\nSaved: benchmark/output/summary_threshold_sweep.png")
-
-# ============================================================================
-# FIGURE 2: Strategy comparison
-# ============================================================================
-fig, ax = plt.subplots(figsize=(11, 7))
-
-strategies = {
-    'Consensus>=4\n(baseline)': [r['threshold_results'][4] for r in all_results],
-    'Consensus>=3': [r['threshold_results'][3] for r in all_results],
-    'Consensus>=2\n(lowered)': [r['threshold_results'][2] for r in all_results],
-    'Consensus>=3\n+ MHC overlap': [r['combined_metrics'] for r in all_results],
+sweep = {
+    key: [np.mean([r['threshold_results'][t][key] for r in all_results])
+          for t in thresholds]
+    for key in ('sens', 'spec', 'ppv', 'f1', 'mcc')
 }
+P.save_figure(
+    P.plot_threshold_sweep(thresholds, sweep, subtitle=SUB),
+    'benchmark/output/threshold_sweep.png')
+print("Saved: benchmark/output/threshold_sweep.png")
 
-metric_names = ['sens', 'spec', 'ppv', 'f1', 'mcc']
-metric_labels = ['Sensitivity', 'Specificity', 'PPV', 'F1', 'MCC']
-x = np.arange(len(metric_names))
-width = 0.2
+per_method = {
+    m: {k: float(np.mean([p[k] for p in perf])) for k in ('sens', 'spec', 'ppv', 'f1')}
+    for m, perf in method_perf.items()
+}
+P.save_figure(
+    P.plot_metric_comparison(per_method, subtitle=SUB),
+    'benchmark/output/method_comparison.png')
+print("Saved: benchmark/output/method_comparison.png")
 
-for i, (strategy_name, results) in enumerate(strategies.items()):
-    vals = [np.mean([r[m] for r in results]) for m in metric_names]
-    ax.bar(x + i*width - 1.5*width, vals, width, label=strategy_name)
+# MCC is the headline: it is zero for random guessing, so it is the metric that
+# shows several of these methods carry no real signal.
+mcc_by_method = {
+    m: float(np.mean([p['mcc'] for p in perf])) for m, perf in method_perf.items()
+}
+P.save_figure(
+    P.plot_mcc_ranking(mcc_by_method,
+                       subtitle=SUB + " · 0 = indistinguishable from random"),
+    'benchmark/output/mcc_ranking.png')
+print("Saved: benchmark/output/mcc_ranking.png")
 
-ax.set_xticks(x)
-ax.set_xticklabels(metric_labels)
-ax.set_ylabel('Score')
-ax.set_title('Strategy Comparison: Improving Sensitivity / Reducing False Negatives')
-ax.legend(loc='upper right')
-ax.set_ylim(0, 1)
-ax.grid(True, alpha=0.3, axis='y')
-
-plt.tight_layout()
-plt.savefig('benchmark/output/strategy_comparison.png', dpi=150, bbox_inches='tight')
-print("Saved: benchmark/output/strategy_comparison.png")
-
-# ============================================================================
-# FIGURE 3: Full results table
-# ============================================================================
-fig, ax = plt.subplots(figsize=(14, 13))
-ax.axis('off')
-
-sorted_results = sorted(all_results, key=lambda r: -r['threshold_results'][3]['f1'])
-
-table_data = []
-for r in sorted_results:
-    m = r['threshold_results'][3]
-    table_data.append([
-        r['accession'], r['organism'][:28], str(r['seq_len']),
-        f"{m['sens']:.2f}", f"{m['spec']:.2f}", f"{m['ppv']:.2f}", f"{m['f1']:.2f}"
-    ])
-
-col_labels = ['Accession', 'Organism', 'Len', 'Sens', 'Spec', 'PPV', 'F1']
-table = ax.table(cellText=table_data, colLabels=col_labels, loc='center',
-                  cellLoc='center', colWidths=[0.15, 0.32, 0.08, 0.1, 0.1, 0.1, 0.1])
-table.auto_set_font_size(False)
-table.set_fontsize(8)
-table.scale(1, 1.15)
-
-for j in range(len(col_labels)):
-    table[(0, j)].set_facecolor('#4472C4')
-    table[(0, j)].set_text_props(color='white', fontweight='bold')
-
-for i, r in enumerate(sorted_results):
-    f1 = r['threshold_results'][3]['f1']
-    color = '#C6EFCE' if f1 > 0.5 else '#FFEB9C' if f1 > 0.3 else '#FFC7CE'
-    for j in range(len(col_labels)):
-        table[(i+1, j)].set_facecolor(color)
-
-ax.set_title(f'Full Benchmark Results — All {len(all_results)} Antigens (sorted by F1, Threshold=3)',
-             fontsize=14, fontweight='bold', pad=20)
-
-plt.tight_layout()
-plt.savefig('benchmark/output/full_results_table.png', dpi=150, bbox_inches='tight')
-print("Saved: benchmark/output/full_results_table.png")
+P.save_figure(
+    P.plot_score_distribution(
+        [r['threshold_results'][3]['f1'] for r in all_results],
+        xlabel="F1 score", title="F1 distribution across antigens",
+        subtitle=f"Consensus threshold = 3 · n = {len(all_results)} antigens"),
+    'benchmark/output/f1_distribution.png')
+print("Saved: benchmark/output/f1_distribution.png")
 
 print("\n" + "="*80)
 print("BENCHMARK COMPLETE")
