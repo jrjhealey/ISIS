@@ -19,6 +19,12 @@ class _ISISBundle(BundleAPI):
             from . import cmd
             cmd.register_all_commands(session)
             _commands_registered = True
+            # Surface a stale/missing core at start-up rather than waiting for
+            # the user to notice methods quietly reporting themselves absent.
+            try:
+                cmd._warn_if_broken(session)
+            except Exception:
+                pass
 
     @staticmethod
     def start_tool(session, tool_name):

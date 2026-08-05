@@ -23,7 +23,7 @@ from .scales import (
     get_method_info,
 )
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 __all__ = [
     "predict",
     "predict_all",

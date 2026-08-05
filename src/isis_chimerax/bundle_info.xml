@@ -1,5 +1,5 @@
 <BundleInfo name="ChimeraX-ISIS"
-            version="2.0.3"
+            version="2.1.0"
             package="chimerax.isis"
             customInit="true"
             minSessionVersion="1" maxSessionVersion="1">
@@ -8,20 +8,54 @@
   <Email>support@nanosyrinx.com</Email>
   <URL>https://github.com/nanosyrinx/isis</URL>
 
-  <Synopsis>B-cell epitope prediction and visualization</Synopsis>
+  <!-- Synopsis and Description are what the Toolshed shows. They described
+       B-cell-only prediction long after T-cell, conformational and innate
+       prediction were added, so the listing understated the bundle. -->
+  <Synopsis>Immunogenicity prediction: B-cell, T-cell and innate epitopes on structures</Synopsis>
   <Description>
-ISIS (In Silico Immunogenicity Studies) provides B-cell epitope
-prediction using established amino acid property scales.
+ISIS (In Silico Immunogenicity Studies) predicts and visualises immunogenic
+features directly on an open structure, colouring residues by score and
+exporting per-residue values.
+
+Prediction classes:
+  B-cell linear         - five amino-acid property scales, with consensus voting
+  B-cell conformational - DiscoTope, ElliPro and SEPPA styles, using SASA,
+                          contact number and protrusion computed from the model
+  T-cell                - MHC class I and II binding from Random Forest models
+                          trained on IEDB data, plus proteasomal cleavage and
+                          TAP transport
+  Innate                - N-/O-glycosylation sequons, signal peptides, TLR motifs
+  Structural features   - SASA, protrusion index, contact number, B-factors
+
+Also provides publication-style per-residue plots generated from the
+structure's own sequence, CSV/JSON export, and 'isis doctor' for diagnosing
+installation problems.
+
+Every prediction class has been benchmarked against experimental data and the
+measured accuracy is reported by 'isis list', including the components that
+perform poorly. MHC-I binding is the most reliable (AUC 0.82-0.95 per allele);
+no conformational method beats plain solvent accessibility; four of the five
+linear B-cell scales do not exceed chance.
+
+Requires the isis-epitope Python package in ChimeraX's own Python. Run
+'isis doctor' if methods report themselves unavailable.
   </Description>
 
   <Categories>
     <Category name="Sequence"/>
     <Category name="Structure Analysis"/>
+    <Category name="Binding Analysis"/>
   </Categories>
 
   <Dependencies>
     <Dependency name="ChimeraX-Core" version=">=1.0"/>
     <Dependency name="ChimeraX-Atomic" version=">=1.0"/>
+    <!-- The prediction code lives in the isis-epitope package. Declaring it here
+         means installing or upgrading this bundle also installs/upgrades the
+         library into ChimeraX's own Python. Without this the bundle installs
+         happily against a stale core and every non-linear method silently
+         reports itself missing. -->
+    <Dependency name="isis-epitope" version=">=2.1"/>
   </Dependencies>
 
   <Classifiers>

@@ -19,70 +19,74 @@ including where methods do not work.
 
 ## Installation
 
-### Core Library
+ISIS is two pieces, and this catches people out:
 
-```bash
-git clone https://github.com/jrjhealey/ISIS.git
-cd ISIS
-pip install -e .
+| Piece | What it is | Where it must live |
+|---|---|---|
+| `isis-epitope` | the prediction library (all the science) | **ChimeraX's own Python**, for the plugin |
+| `ChimeraX-ISIS` | the plugin (commands, colouring, plots) | ChimeraX |
+
+Installing only the plugin leaves it running against whatever `isis-epitope` is
+already present. If that copy is old, the linear scales still work while T-cell,
+conformational and innate prediction all report themselves `UNAVAILABLE` -- which
+looks like missing features rather than a broken install. The plugin now declares
+`isis-epitope >= 2.1` as a dependency and checks the version at start-up, but if
+you hit it, **`isis doctor`** prints the state and the exact repair command.
+
+### For the ChimeraX plugin
+
+From the ChimeraX command line:
+
+```
+pip install isis-epitope upgrade true
 ```
 
-### ChimeraX Plugin
-
-#### Easy Install (Recommended)
-
-```bash
-# macOS/Linux - run from the ISIS directory:
-./install_chimerax.sh
-
-# Or use Python directly with ChimeraX's interpreter:
-/Applications/ChimeraX-1.10.app/Contents/bin/python3.11 install_chimerax.py
-```
-
-The installer will:
-1. Find your ChimeraX installation
-2. Install the ISIS core library into ChimeraX's Python
-3. Install the ChimeraX plugin bundle
-
-**Restart ChimeraX after installation.**
-
-#### Manual Install
-
-If the automatic installer doesn't work:
-
-1. **Install the core library into ChimeraX's Python:**
-
-```bash
-# macOS
-/Applications/ChimeraX-1.10.app/Contents/bin/python3.11 -m pip install /path/to/ISIS
-
-# Linux
-/usr/lib/chimerax/bin/python3 -m pip install /path/to/ISIS
-
-# Windows
-"C:\Program Files\ChimeraX\bin\python.exe" -m pip install C:\path\to\ISIS
-```
-
-2. **Install the ChimeraX bundle** (in ChimeraX command line):
+then install the plugin from a clone:
 
 ```
 devel install /path/to/ISIS/src/isis_chimerax
 ```
 
-3. **Restart ChimeraX**
+Confirm with:
 
-#### Uninstall
+```
+isis doctor
+```
+
+which should report `Core library : isis-epitope 2.1.0` or newer and every
+component `OK`.
+
+### For CLI / Python use only
 
 ```bash
-./install_chimerax.sh --uninstall
+git clone https://github.com/jrjhealey/ISIS.git
+cd ISIS
+pip install -e ".[ml,plot]"
 ```
 
-Or manually in ChimeraX:
+Extras: `ml` pulls scikit-learn and joblib (needed for the MHC models),
+`plot` pulls matplotlib (needed for `isis plot`). ChimeraX 1.12 already ships
+matplotlib, so `plot` is only required for CLI plotting.
+
+### Upgrading
+
+Upgrade **both** pieces, or the version check will tell you off:
+
 ```
-toolshed uninstall ChimeraX-ISIS
+pip install isis-epitope upgrade true     # in ChimeraX
+devel install /path/to/ISIS/src/isis_chimerax
 ```
 
----
+### Troubleshooting installation
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `isis list` shows only the 5 linear scales | old `isis-epitope` without the methods module | `pip install isis-epitope upgrade true` |
+| Everything `UNAVAILABLE` | `isis-epitope` not in ChimeraX's Python | same as above |
+| Toolshed shows an old version | stale plugin | reinstall with `devel install` |
+| `isis plot` says matplotlib missing | no matplotlib in ChimeraX's Python | `pip install matplotlib` |
+
+Run `isis doctor` first in every case -- it names the problem and the command.
 
 ## Quick Start
 

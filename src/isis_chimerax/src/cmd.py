@@ -1,48 +1,72 @@
 """
-ChimeraX commands for ISIS epitope prediction.
+ISIS - In Silico Immunogenicity Studies: ChimeraX commands.
 
-Command structure:
-    isis bcell linear #1 [method <name>]
-    isis bcell conformational #1 [method <name>]
-    isis bcell consensus #1
+Predicts and visualises immunogenic features directly on an open structure.
 
-    isis tcell mhc1 #1 [allele <name>]
-    isis tcell mhc2 #1 [allele <name>]
-    isis tcell proteasome #1
-    isis tcell tap #1
-    isis tcell consensus #1
+B-cell linear (sequence-based)
+    isis bcell linear <spec> [method <name>] [window <n>] [threshold <x>]
+    isis bcell consensus <spec> [minMethods <n>] [minLength <n>]
 
-    isis innate glyco #1
-    isis innate signal #1
-    isis innate tlr #1
-    isis innate consensus #1
+B-cell conformational (uses SASA/contacts/protrusion from the structure)
+    isis bcell conformational <spec> [method discotope|ellipro|seppa]
 
-    isis structure sasa #1
-    isis structure protrusion #1
-    isis structure contacts #1
-    isis structure bfactor #1
+T-cell
+    isis tcell mhc1 <spec> [allele <name>] [length <n>]
+    isis tcell mhc2 <spec> [allele <name>]
+    isis tcell proteasome <spec>
+    isis tcell tap <spec>
+    isis tcell consensus <spec> [allele <name>]
 
-    isis color #1 [method <name>] [palette <colors>]
-    isis export #1 [format csv|json]
-    isis plot #1 [method <name>] [outdir <path>]
-    isis clear #1
-    isis list
+Innate immunity
+    isis innate glyco <spec> [glycoType n|o]
+    isis innate signal <spec>
+    isis innate tlr <spec>
+    isis innate consensus <spec>
 
-Legacy commands (still work):
-    isis predict #1 [method <name>]
-    isis consensus #1
+Structural features
+    isis structure sasa <spec>
+    isis structure protrusion <spec>
+    isis structure contacts <spec> [cutoff <A>]
+    isis structure bfactor <spec>
+
+Output and utilities
+    isis plot <spec> [method <names>] [window <n>] [minMethods <n>]
+              [outdir <path>] [prefix <name>]
+    isis export <spec> [format csv|json] [output <path>]
+    isis color <spec> [method <name>] [palette <colors>]
+    isis clear <spec>
+    isis list                 - methods, installed alleles, benchmarked accuracy
+    isis doctor               - installation report and how to repair it
+
+Legacy aliases (still supported)
+    isis predict <spec> [method <name>]
+    isis consensus <spec>
+    isis epitopes <spec> [method <name>] [color <name>]
 
 Specifications
 --------------
-Every command that takes a specification accepts a residue spec, so a chain
-selector is honoured: `isis bcell linear #1/A` scores chain A only, while
-`#1` covers every chain. Colouring, export and clearing are likewise confined
-to the chains named.
+Commands take a residue spec, so a chain selector is honoured: `#1/A` scores
+chain A alone, `#1` covers every chain, `#1/A,C` two chains. Colouring, export
+and clearing are confined to the chains named.
 
-A spec that clips a chain part-way (`#1/A:100-200`) selects that chain but
-does not truncate it - scoring always runs over the chain's full sequence,
-because a sliding window over a fragment does not reproduce the scores it
-would have over the whole protein.
+A spec that clips a chain part-way (`#1/A:100-200`) selects that chain but does
+not truncate it - scoring always runs over the chain's full sequence, because a
+sliding window over a fragment does not reproduce the scores it would have in
+the whole protein.
+
+Installation
+------------
+The prediction code lives in the separate `isis-epitope` package, which must be
+importable from ChimeraX's own Python. If methods report themselves UNAVAILABLE,
+run `isis doctor`: it prints the state and the exact command to repair it.
+
+Accuracy
+--------
+Every class has been benchmarked against experimental data; `isis list` reports
+the numbers, including for the components that perform poorly. Briefly: MHC-I
+binding is the most reliable (AUC 0.82-0.95 per allele), no conformational
+method beats plain solvent accessibility, and four of the five linear B-cell
+scales do not exceed chance.
 """
 
 from chimerax.core.commands import CmdDesc, register, StringArg, IntArg, FloatArg, BoolArg
@@ -50,14 +74,37 @@ from chimerax.atomic import ResiduesArg
 
 import numpy as np
 
-# Import ISIS core modules
+# The prediction code lives in the separate `isis-epitope` package, which must
+# be importable from ChimeraX's OWN bundled Python - not the system Python.
+#
+# This is the failure mode worth being loud about: the bundle installs fine
+# against a stale or absent core, every non-linear method then reports itself
+# "not installed", and the listing reads like the tool only supports the five
+# original linear scales. It looks like a missing feature rather than a broken
+# install. Hence the version check and the explicit remedy below.
+MIN_CORE_VERSION = (2, 1)
+
+CORE_VERSION = None
+CORE_PROBLEM = None  # human-readable reason, or None when everything is fine
+
 try:
     from isis import predict, predict_all, available_methods, METHOD_INFO
+    from isis import __version__ as _core_version_str
+    CORE_VERSION = _core_version_str
     ISIS_AVAILABLE = True
-except ImportError:
+except ImportError as _e:
     ISIS_AVAILABLE = False
+    CORE_PROBLEM = f"the isis-epitope package is not installed ({_e})"
 
-# Import new method modules
+
+def _version_tuple(text):
+    parts = []
+    for chunk in str(text).split("."):
+        digits = "".join(c for c in chunk if c.isdigit())
+        parts.append(int(digits) if digits else 0)
+    return tuple(parts)
+
+
 try:
     from isis.methods.bcell_conformational import (
         DiscoTopePredictor, ElliProPredictor, SEPPAPredictor,
@@ -71,8 +118,21 @@ try:
         detect_surface_patches
     )
     METHODS_AVAILABLE = True
-except ImportError:
+except ImportError as _e:
     METHODS_AVAILABLE = False
+    if ISIS_AVAILABLE and CORE_PROBLEM is None:
+        # Core imports but the method modules do not: the classic symptom of an
+        # old B-cell-linear-only install left behind by an earlier version.
+        CORE_PROBLEM = (
+            f"isis-epitope {CORE_VERSION} is installed but too old - it has no "
+            f"methods module, so only the linear B-cell scales are available "
+            f"(need >= {'.'.join(str(v) for v in MIN_CORE_VERSION)})")
+
+if (ISIS_AVAILABLE and CORE_PROBLEM is None
+        and _version_tuple(CORE_VERSION) < MIN_CORE_VERSION):
+    CORE_PROBLEM = (
+        f"isis-epitope {CORE_VERSION} is older than the "
+        f"{'.'.join(str(v) for v in MIN_CORE_VERSION)} this bundle expects")
 
 # Plotting is optional - the bundle stays usable for colouring structures even
 # if matplotlib is missing from ChimeraX's Python.
@@ -81,6 +141,45 @@ try:
     PLOTTING_AVAILABLE = True
 except ImportError:
     PLOTTING_AVAILABLE = False
+
+
+def _chimerax_python():
+    """
+    Path to ChimeraX's own interpreter, which is where the core must live.
+
+    Derived from sys.prefix rather than sys.executable: inside ChimeraX the
+    latter is the launcher binary (/usr/bin/chimerax), so using it would print
+    a repair command that cannot work.
+    """
+    import os as _os
+    import sys as _sys
+    candidate = _os.path.join(
+        _sys.prefix, "bin",
+        f"python{_sys.version_info.major}.{_sys.version_info.minor}")
+    return candidate if _os.path.exists(candidate) else _sys.executable
+
+
+def _fix_instructions():
+    """The exact commands that repair a missing or stale core install."""
+    return [
+        "Fix, typed straight into the ChimeraX command line:",
+        "    pip install isis-epitope upgrade true",
+        "From a clone of the repository instead:",
+        "    pip install /path/to/ISIS upgrade true",
+        "Or from a shell, using ChimeraX's own interpreter:",
+        f'    "{_chimerax_python()}" -m pip install --upgrade isis-epitope',
+        "Restart ChimeraX afterwards, then run 'isis doctor' to confirm.",
+    ]
+
+
+def _warn_if_broken(session):
+    """Report a missing/stale core loudly, once, with the remedy."""
+    if CORE_PROBLEM is None:
+        return False
+    session.logger.warning(f"ISIS: {CORE_PROBLEM}")
+    for line in _fix_instructions():
+        session.logger.warning(f"ISIS: {line}")
+    return True
 
 ATTR_PREFIX = "isis_"
 
@@ -973,7 +1072,7 @@ def isis_plot(session, sel, method=None, window=None, minMethods=3,
     if not PLOTTING_AVAILABLE:
         session.logger.error(
             "Plotting needs matplotlib in ChimeraX's Python. Install with:\n"
-            "  chimerax --nogui --exit --cmd 'pip install matplotlib'")
+            "    pip install matplotlib      (in the ChimeraX command line)")
         return
 
     import os
@@ -1054,6 +1153,57 @@ def isis_clear(session, sel):
                 f"{structure.name}/{chain_list}: No ISIS attributes found")
 
 
+def isis_doctor(session):
+    """
+    Report the installation state and how to repair it.
+
+    Exists because the common failure is silent: the bundle loads, the linear
+    scales work, and everything else reports itself missing, which reads as
+    "this tool only does B-cell linear" rather than "the library is stale".
+    """
+    import sys as _sys
+    log = session.logger.info
+
+    log("ISIS installation report")
+    log("")
+    log(f"  ChimeraX Python : {_sys.executable}")
+    log(f"  Python version  : {_sys.version.split()[0]}")
+    log("  Bundle          : ChimeraX-ISIS (this plugin)")
+    log(f"  Core library    : isis-epitope {CORE_VERSION or 'NOT FOUND'}")
+    log(f"  Expected core   : >= {'.'.join(str(v) for v in MIN_CORE_VERSION)}")
+    log("")
+
+    log("  Component status")
+    rows = [
+        ("B-cell linear scales", ISIS_AVAILABLE),
+        ("B-cell conformational", METHODS_AVAILABLE),
+        ("T-cell / MHC", METHODS_AVAILABLE),
+        ("Innate immunity", METHODS_AVAILABLE),
+        ("Structural features", True),
+        ("Plotting (matplotlib)", PLOTTING_AVAILABLE),
+    ]
+    for label, ok in rows:
+        log(f"    {'OK     ' if ok else 'MISSING'}  {label}")
+
+    if METHODS_AVAILABLE:
+        try:
+            from isis.models.mhc_predictor import MHCPredictor
+            mp = MHCPredictor()
+            log(f"    OK       MHC models: {len(mp.available_alleles(1))} class I, "
+                f"{len(mp.available_alleles(2))} class II alleles")
+        except Exception as e:
+            log(f"    MISSING  MHC models ({e})")
+
+    log("")
+    if CORE_PROBLEM is None and METHODS_AVAILABLE:
+        log("  Everything required is present. Run 'isis list' for the methods.")
+    else:
+        if CORE_PROBLEM:
+            session.logger.warning(f"  Problem: {CORE_PROBLEM}")
+        for line in _fix_instructions():
+            log(f"  {line}")
+
+
 def isis_list(session):
     """
     List available prediction methods and the alleles actually installed.
@@ -1065,8 +1215,14 @@ def isis_list(session):
     """
     log = session.logger.info
 
-    log("ISIS Prediction Methods:")
+    log(f"ISIS Prediction Methods  (core library isis-epitope "
+        f"{CORE_VERSION or 'NOT INSTALLED'})")
     log("")
+    if _warn_if_broken(session):
+        log("")
+        log("Methods shown UNAVAILABLE below are a broken install, not")
+        log("missing features. Run 'isis doctor' for the full report.")
+        log("")
 
     log("B-cell Linear (sequence-based) - isis bcell linear:")
     if ISIS_AVAILABLE:
@@ -1074,7 +1230,7 @@ def isis_list(session):
             info = METHOD_INFO.get(method, {})
             log(f"  {method}: {info.get('name', method)}")
     else:
-        log("  (ISIS core not installed)")
+        log("  UNAVAILABLE - isis-epitope missing; run 'isis doctor'")
 
     log("")
     log("B-cell Conformational (needs 3D structure) - isis bcell conformational:")
@@ -1084,7 +1240,7 @@ def isis_list(session):
                                ("seppa", SEPPAPredictor)):
             log(f"  {key}: {getattr(predictor, 'description', key)}")
     else:
-        log("  (methods module not installed)")
+        log("  UNAVAILABLE - core library missing or too old; run 'isis doctor'")
 
     log("")
     log("T-cell (MHC binding) - isis tcell mhc1 / mhc2:")
@@ -1106,7 +1262,7 @@ def isis_list(session):
         log("  tap: TAP transport efficiency")
         log("  consensus: combined MHC + cleavage + TAP pipeline")
     else:
-        log("  (methods module not installed)")
+        log("  UNAVAILABLE - core library missing or too old; run 'isis doctor'")
 
     log("")
     log("Innate Immunity - isis innate:")
@@ -1116,7 +1272,7 @@ def isis_list(session):
         log("  tlr: TLR ligand motifs")
         log("  consensus: weighted combination of the above")
     else:
-        log("  (methods module not installed)")
+        log("  UNAVAILABLE - core library missing or too old; run 'isis doctor'")
 
     log("")
     log("Structural Analysis - isis structure:")
@@ -1136,6 +1292,8 @@ def isis_list(session):
     log("Specs: any command accepts a residue spec, so #1/A means chain A only.")
     log("A spec that clips a chain selects it without truncating its sequence.")
 
+    log("")
+    log("Run 'isis doctor' to check the installation.")
     log("")
     log("Benchmarked accuracy (see benchmark/ in the repository):")
     log("  MHC-I binding      AUC 0.82-0.95 per allele (mean 0.87) - most reliable")
@@ -1321,6 +1479,9 @@ def register_all_commands(session):
             synopsis="Clear ISIS attributes"
         )
         reg("isis clear", desc, isis_clear)
+
+        desc = CmdDesc(synopsis="Report ISIS installation state and how to fix it")
+        reg("isis doctor", desc, isis_doctor)
 
         # Residue spec (not structure spec) so `isis plot #1/A` honours the chain.
         desc = CmdDesc(
