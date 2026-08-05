@@ -24,16 +24,29 @@ Command structure:
 
     isis color #1 [method <name>] [palette <colors>]
     isis export #1 [format csv|json]
+    isis plot #1 [method <name>] [outdir <path>]
     isis clear #1
     isis list
 
 Legacy commands (still work):
     isis predict #1 [method <name>]
     isis consensus #1
+
+Specifications
+--------------
+Every command that takes a specification accepts a residue spec, so a chain
+selector is honoured: `isis bcell linear #1/A` scores chain A only, while
+`#1` covers every chain. Colouring, export and clearing are likewise confined
+to the chains named.
+
+A spec that clips a chain part-way (`#1/A:100-200`) selects that chain but
+does not truncate it - scoring always runs over the chain's full sequence,
+because a sliding window over a fragment does not reproduce the scores it
+would have over the whole protein.
 """
 
 from chimerax.core.commands import CmdDesc, register, StringArg, IntArg, FloatArg, BoolArg
-from chimerax.atomic import AtomicStructuresArg, ResiduesArg
+from chimerax.atomic import ResiduesArg
 
 import numpy as np
 
@@ -75,25 +88,6 @@ ATTR_PREFIX = "isis_"
 # =============================================================================
 # Helper Functions
 # =============================================================================
-
-def _get_chains(structure):
-    """
-    Extract chains with sequences from structure.
-
-    Uses chain.residues (not chain.existing_residues): the former is
-    index-parallel with chain.characters, with None standing in for any
-    position not present in the model (common in cryo-EM/crystal structures
-    with disordered/unresolved loops). chain.existing_residues is compacted
-    and drops those gaps, which silently misaligns sequence position i with
-    the wrong residue for any chain that isn't fully modeled.
-    """
-    chains = []
-    for chain in structure.chains:
-        seq = chain.characters
-        if seq and len(seq) >= 6:
-            chains.append((chain.chain_id, seq, chain.residues))
-    return chains
-
 
 def _get_ca_coords(residues):
     """Extract CA coordinates from residues (None entries -> NaN row for gaps)."""
@@ -173,10 +167,73 @@ def _dense_from_tcell_result(result, seq_len):
     return scores
 
 
-def _auto_color(session, structure, attr_name, palette="white:yellow:red"):
-    """Auto-color structure by attribute."""
+def _chain_groups(sel):
+    """
+    Group a residue selection into per-structure lists of whole chains.
+
+    Yields (structure, [(chain_id, sequence, chain_residues), ...]) for every
+    chain the specification touches, in first-seen order.
+
+    Each chain contributes its FULL sequence and full index-parallel residue
+    list, not merely the selected slice: a spec that clips a chain part-way
+    selects that chain, it does not truncate it. A sliding window run over a
+    fragment would not give the same scores as over the whole protein, so
+    honouring the clip literally would silently change the numbers.
+
+    This is what makes `#1/A` mean chain A. Passing a whole-structure spec
+    (`#1`) still yields every chain, so existing usage is unaffected.
+    """
+    order = []
+    chain_ids = {}
+    for res in sel:
+        st = res.structure
+        if st not in chain_ids:
+            chain_ids[st] = []
+            order.append(st)
+        if res.chain_id not in chain_ids[st]:
+            chain_ids[st].append(res.chain_id)
+
+    for st in order:
+        by_id = {c.chain_id: c for c in st.chains}
+        chains = []
+        for cid in chain_ids[st]:
+            chain = by_id.get(cid)
+            if chain is None:
+                continue
+            seq = chain.characters
+            if seq and len(seq) >= 6:
+                chains.append((cid, seq, chain.residues))
+        if chains:
+            yield st, chains
+
+
+def _chain_residues(chains):
+    """Flat list of modelled residues across the given chains (skips gaps)."""
+    out = []
+    for _cid, _seq, residues in chains:
+        out.extend(r for r in residues if r is not None)
+    return out
+
+
+def _chain_spec(structure, chains):
+    """Atom spec covering just the given chains of a structure."""
+    if not chains:
+        return structure.atomspec
+    ids = ",".join(cid for cid, _seq, _res in chains)
+    return f"{structure.atomspec}/{ids}"
+
+
+def _auto_color(session, structure, attr_name, palette="white:yellow:red",
+                chains=None):
+    """
+    Colour by attribute, restricted to the chains that were selected.
+
+    Scoping matters: colouring the whole structure when only one chain was
+    asked for would repaint the other chains using their (absent) attribute
+    values, visibly changing subunits the user did not ask about.
+    """
     from chimerax.core.commands import run
-    spec = structure.atomspec
+    spec = _chain_spec(structure, chains)
     run(session, f"color byattribute {attr_name} {spec} palette {palette}")
 
 
@@ -218,7 +275,7 @@ def _find_epitope_regions(scores, threshold, min_length=6):
 # B-cell Linear Epitopes (existing methods)
 # =============================================================================
 
-def isis_bcell_linear(session, structures, method="emini", window=None, threshold=None):
+def isis_bcell_linear(session, sel, method="emini", window=None, threshold=None):
     """Run B-cell linear epitope prediction."""
     if not ISIS_AVAILABLE:
         session.logger.error("ISIS library not installed")
@@ -226,12 +283,12 @@ def isis_bcell_linear(session, structures, method="emini", window=None, threshol
 
     from chimerax.atomic import Residue
 
-    for structure in structures:
+    for structure, _chains in _chain_groups(sel):
         session.logger.info(f"B-cell linear prediction ({method}) on {structure.name}...")
         attr_name = f"{ATTR_PREFIX}bcell_{method.replace('-', '_')}"
         _register_attr(session, attr_name)
 
-        for chain_id, seq, residues in _get_chains(structure):
+        for chain_id, seq, residues in _chains:
             try:
                 pred = predict(seq, method=method, window_size=window, threshold=threshold)
                 scores = np.array([pred.score_at(i+1) or 0 for i in range(len(seq))])
@@ -243,22 +300,22 @@ def isis_bcell_linear(session, structures, method="emini", window=None, threshol
             except Exception as e:
                 session.logger.error(f"  Chain {chain_id}: {e}")
 
-        _auto_color(session, structure, attr_name)
+        _auto_color(session, structure, attr_name, chains=_chains)
         session.logger.info(f"Scores stored as: {attr_name}")
 
 
-def isis_bcell_conformational(session, structures, method="discotope"):
+def isis_bcell_conformational(session, sel, method="discotope"):
     """Run B-cell conformational epitope prediction (requires 3D structure)."""
     if not METHODS_AVAILABLE:
         session.logger.error("ISIS methods module not available")
         return
 
-    for structure in structures:
+    for structure, _chains in _chain_groups(sel):
         session.logger.info(f"B-cell conformational prediction ({method}) on {structure.name}...")
         attr_name = f"{ATTR_PREFIX}bcell_conf_{method}"
         _register_attr(session, attr_name)
 
-        for chain_id, seq, residues in _get_chains(structure):
+        for chain_id, seq, residues in _chains:
             try:
                 coords = _get_ca_coords(residues)
                 sasa = _get_sasa_values(session, structure, residues)
@@ -292,11 +349,11 @@ def isis_bcell_conformational(session, structures, method="discotope"):
                 import traceback
                 session.logger.error(traceback.format_exc())
 
-        _auto_color(session, structure, attr_name, palette="white:cyan:blue")
+        _auto_color(session, structure, attr_name, palette="white:cyan:blue", chains=_chains)
         session.logger.info(f"Scores stored as: {attr_name}")
 
 
-def isis_bcell_consensus(session, structures, min_methods=2, min_length=6):
+def isis_bcell_consensus(session, sel, min_methods=2, min_length=6):
     """Consensus across all B-cell methods (linear + conformational)."""
     if not ISIS_AVAILABLE:
         session.logger.error("ISIS library not installed")
@@ -308,10 +365,10 @@ def isis_bcell_consensus(session, structures, min_methods=2, min_length=6):
     attr_name = f"{ATTR_PREFIX}bcell_consensus"
     _register_attr(session, attr_name)
 
-    for structure in structures:
+    for structure, _chains in _chain_groups(sel):
         session.logger.info(f"B-cell consensus on {structure.name}...")
 
-        for chain_id, seq, residues in _get_chains(structure):
+        for chain_id, seq, residues in _chains:
             votes = np.zeros(len(seq))
             methods_run = 0
 
@@ -364,14 +421,14 @@ def isis_bcell_consensus(session, structures, min_methods=2, min_length=6):
                 peptide = seq[start-1:end]
                 session.logger.info(f"    {start}-{end}: {peptide} (avg {avg:.1f} methods)")
 
-        _auto_color(session, structure, attr_name, palette="white:yellow:orange:red")
+        _auto_color(session, structure, attr_name, palette="white:yellow:orange:red", chains=_chains)
 
 
 # =============================================================================
 # T-cell Epitopes
 # =============================================================================
 
-def isis_tcell_mhc1(session, structures, allele="HLA-A*02:01", length=9):
+def isis_tcell_mhc1(session, sel, allele="HLA-A*02:01", length=9):
     """Predict MHC Class I binding."""
     if not METHODS_AVAILABLE:
         session.logger.error("ISIS methods module not available")
@@ -381,10 +438,10 @@ def isis_tcell_mhc1(session, structures, allele="HLA-A*02:01", length=9):
     attr_name = f"{ATTR_PREFIX}tcell_mhc1"
     _register_attr(session, attr_name)
 
-    for structure in structures:
+    for structure, _chains in _chain_groups(sel):
         session.logger.info(f"MHC-I prediction ({allele}) on {structure.name}...")
 
-        for chain_id, seq, residues in _get_chains(structure):
+        for chain_id, seq, residues in _chains:
             try:
                 result = predictor.predict_mhc1(seq, allele=allele, peptide_length=length)
 
@@ -402,10 +459,10 @@ def isis_tcell_mhc1(session, structures, allele="HLA-A*02:01", length=9):
             except Exception as e:
                 session.logger.error(f"  Chain {chain_id}: {e}")
 
-        _auto_color(session, structure, attr_name, palette="white:green:darkgreen")
+        _auto_color(session, structure, attr_name, palette="white:green:darkgreen", chains=_chains)
 
 
-def isis_tcell_mhc2(session, structures, allele="HLA-DRB1*01:01"):
+def isis_tcell_mhc2(session, sel, allele="HLA-DRB1*01:01"):
     """Predict MHC Class II binding."""
     if not METHODS_AVAILABLE:
         session.logger.error("ISIS methods module not available")
@@ -415,10 +472,10 @@ def isis_tcell_mhc2(session, structures, allele="HLA-DRB1*01:01"):
     attr_name = f"{ATTR_PREFIX}tcell_mhc2"
     _register_attr(session, attr_name)
 
-    for structure in structures:
+    for structure, _chains in _chain_groups(sel):
         session.logger.info(f"MHC-II prediction ({allele}) on {structure.name}...")
 
-        for chain_id, seq, residues in _get_chains(structure):
+        for chain_id, seq, residues in _chains:
             try:
                 result = predictor.predict_mhc2(seq, allele=allele)
 
@@ -434,10 +491,10 @@ def isis_tcell_mhc2(session, structures, allele="HLA-DRB1*01:01"):
             except Exception as e:
                 session.logger.error(f"  Chain {chain_id}: {e}")
 
-        _auto_color(session, structure, attr_name, palette="white:purple:darkviolet")
+        _auto_color(session, structure, attr_name, palette="white:purple:darkviolet", chains=_chains)
 
 
-def isis_tcell_proteasome(session, structures):
+def isis_tcell_proteasome(session, sel):
     """Predict proteasomal cleavage sites."""
     if not METHODS_AVAILABLE:
         session.logger.error("ISIS methods module not available")
@@ -447,10 +504,10 @@ def isis_tcell_proteasome(session, structures):
     attr_name = f"{ATTR_PREFIX}tcell_cleavage"
     _register_attr(session, attr_name)
 
-    for structure in structures:
+    for structure, _chains in _chain_groups(sel):
         session.logger.info(f"Proteasomal cleavage prediction on {structure.name}...")
 
-        for chain_id, seq, residues in _get_chains(structure):
+        for chain_id, seq, residues in _chains:
             try:
                 result = predictor.predict_cleavage(seq)
                 _store_scores(residues, result.scores, attr_name)
@@ -464,10 +521,10 @@ def isis_tcell_proteasome(session, structures):
             except Exception as e:
                 session.logger.error(f"  Chain {chain_id}: {e}")
 
-        _auto_color(session, structure, attr_name, palette="white:orange:red")
+        _auto_color(session, structure, attr_name, palette="white:orange:red", chains=_chains)
 
 
-def isis_tcell_tap(session, structures):
+def isis_tcell_tap(session, sel):
     """Predict TAP transport efficiency."""
     if not METHODS_AVAILABLE:
         session.logger.error("ISIS methods module not available")
@@ -477,10 +534,10 @@ def isis_tcell_tap(session, structures):
     attr_name = f"{ATTR_PREFIX}tcell_tap"
     _register_attr(session, attr_name)
 
-    for structure in structures:
+    for structure, _chains in _chain_groups(sel):
         session.logger.info(f"TAP transport prediction on {structure.name}...")
 
-        for chain_id, seq, residues in _get_chains(structure):
+        for chain_id, seq, residues in _chains:
             try:
                 result = predictor.predict_tap(seq)
 
@@ -491,10 +548,10 @@ def isis_tcell_tap(session, structures):
             except Exception as e:
                 session.logger.error(f"  Chain {chain_id}: {e}")
 
-        _auto_color(session, structure, attr_name, palette="white:lightblue:blue")
+        _auto_color(session, structure, attr_name, palette="white:lightblue:blue", chains=_chains)
 
 
-def isis_tcell_consensus(session, structures, allele="HLA-A*02:01"):
+def isis_tcell_consensus(session, sel, allele="HLA-A*02:01"):
     """Combined T-cell epitope prediction pipeline."""
     if not METHODS_AVAILABLE:
         session.logger.error("ISIS methods module not available")
@@ -504,10 +561,10 @@ def isis_tcell_consensus(session, structures, allele="HLA-A*02:01"):
     attr_name = f"{ATTR_PREFIX}tcell_consensus"
     _register_attr(session, attr_name)
 
-    for structure in structures:
+    for structure, _chains in _chain_groups(sel):
         session.logger.info(f"T-cell consensus prediction on {structure.name}...")
 
-        for chain_id, seq, residues in _get_chains(structure):
+        for chain_id, seq, residues in _chains:
             try:
                 result = predictor.predict_pipeline(seq, allele=allele)
 
@@ -524,14 +581,14 @@ def isis_tcell_consensus(session, structures, allele="HLA-A*02:01"):
             except Exception as e:
                 session.logger.error(f"  Chain {chain_id}: {e}")
 
-        _auto_color(session, structure, attr_name, palette="white:lime:green")
+        _auto_color(session, structure, attr_name, palette="white:lime:green", chains=_chains)
 
 
 # =============================================================================
 # Innate Immunity
 # =============================================================================
 
-def isis_innate_glyco(session, structures, glyco_type="n"):
+def isis_innate_glyco(session, sel, glyco_type="n"):
     """Predict glycosylation sites."""
     if not METHODS_AVAILABLE:
         session.logger.error("ISIS methods module not available")
@@ -541,10 +598,10 @@ def isis_innate_glyco(session, structures, glyco_type="n"):
     attr_name = f"{ATTR_PREFIX}innate_{glyco_type}glyco"
     _register_attr(session, attr_name)
 
-    for structure in structures:
+    for structure, _chains in _chain_groups(sel):
         session.logger.info(f"{glyco_type.upper()}-glycosylation prediction on {structure.name}...")
 
-        for chain_id, seq, residues in _get_chains(structure):
+        for chain_id, seq, residues in _chains:
             try:
                 if glyco_type == "n":
                     result = predictor.predict_n_glyco(seq)
@@ -570,10 +627,10 @@ def isis_innate_glyco(session, structures, glyco_type="n"):
             except Exception as e:
                 session.logger.error(f"  Chain {chain_id}: {e}")
 
-        _auto_color(session, structure, attr_name, palette="white:pink:magenta")
+        _auto_color(session, structure, attr_name, palette="white:pink:magenta", chains=_chains)
 
 
-def isis_innate_signal(session, structures):
+def isis_innate_signal(session, sel):
     """Predict signal peptide."""
     if not METHODS_AVAILABLE:
         session.logger.error("ISIS methods module not available")
@@ -583,10 +640,10 @@ def isis_innate_signal(session, structures):
     attr_name = f"{ATTR_PREFIX}innate_signal"
     _register_attr(session, attr_name)
 
-    for structure in structures:
+    for structure, _chains in _chain_groups(sel):
         session.logger.info(f"Signal peptide prediction on {structure.name}...")
 
-        for chain_id, seq, residues in _get_chains(structure):
+        for chain_id, seq, residues in _chains:
             try:
                 result = predictor.predict_signal_peptide(seq)
 
@@ -609,10 +666,10 @@ def isis_innate_signal(session, structures):
             except Exception as e:
                 session.logger.error(f"  Chain {chain_id}: {e}")
 
-        _auto_color(session, structure, attr_name, palette="white:yellow:orange")
+        _auto_color(session, structure, attr_name, palette="white:yellow:orange", chains=_chains)
 
 
-def isis_innate_tlr(session, structures):
+def isis_innate_tlr(session, sel):
     """Predict TLR ligand motifs."""
     if not METHODS_AVAILABLE:
         session.logger.error("ISIS methods module not available")
@@ -622,10 +679,10 @@ def isis_innate_tlr(session, structures):
     attr_name = f"{ATTR_PREFIX}innate_tlr"
     _register_attr(session, attr_name)
 
-    for structure in structures:
+    for structure, _chains in _chain_groups(sel):
         session.logger.info(f"TLR motif prediction on {structure.name}...")
 
-        for chain_id, seq, residues in _get_chains(structure):
+        for chain_id, seq, residues in _chains:
             try:
                 result = predictor.predict_tlr_motifs(seq)
 
@@ -648,10 +705,10 @@ def isis_innate_tlr(session, structures):
             except Exception as e:
                 session.logger.error(f"  Chain {chain_id}: {e}")
 
-        _auto_color(session, structure, attr_name, palette="white:coral:red")
+        _auto_color(session, structure, attr_name, palette="white:coral:red", chains=_chains)
 
 
-def isis_innate_consensus(session, structures):
+def isis_innate_consensus(session, sel):
     """Consensus across all innate immunity predictions."""
     if not METHODS_AVAILABLE:
         session.logger.error("ISIS methods module not available")
@@ -661,10 +718,10 @@ def isis_innate_consensus(session, structures):
     attr_name = f"{ATTR_PREFIX}innate_consensus"
     _register_attr(session, attr_name)
 
-    for structure in structures:
+    for structure, _chains in _chain_groups(sel):
         session.logger.info(f"Innate immunity consensus on {structure.name}...")
 
-        for chain_id, seq, residues in _get_chains(structure):
+        for chain_id, seq, residues in _chains:
             try:
                 # Combine all innate predictions
                 scores = np.zeros(len(seq))
@@ -694,22 +751,22 @@ def isis_innate_consensus(session, structures):
             except Exception as e:
                 session.logger.error(f"  Chain {chain_id}: {e}")
 
-        _auto_color(session, structure, attr_name, palette="white:salmon:darkred")
+        _auto_color(session, structure, attr_name, palette="white:salmon:darkred", chains=_chains)
 
 
 # =============================================================================
 # Structural Analysis
 # =============================================================================
 
-def isis_structure_sasa(session, structures):
+def isis_structure_sasa(session, sel):
     """Calculate and display solvent accessible surface area."""
     attr_name = f"{ATTR_PREFIX}structure_sasa"
     _register_attr(session, attr_name)
 
-    for structure in structures:
+    for structure, _chains in _chain_groups(sel):
         session.logger.info(f"SASA calculation on {structure.name}...")
 
-        for chain_id, seq, residues in _get_chains(structure):
+        for chain_id, seq, residues in _chains:
             try:
                 sasa = _get_sasa_values(session, structure, residues)
                 _store_scores(residues, sasa, attr_name)
@@ -720,10 +777,10 @@ def isis_structure_sasa(session, structures):
             except Exception as e:
                 session.logger.error(f"  Chain {chain_id}: {e}")
 
-        _auto_color(session, structure, attr_name, palette="blue:white:red")
+        _auto_color(session, structure, attr_name, palette="blue:white:red", chains=_chains)
 
 
-def isis_structure_protrusion(session, structures):
+def isis_structure_protrusion(session, sel):
     """Calculate protrusion index."""
     if not METHODS_AVAILABLE:
         session.logger.error("ISIS methods module not available")
@@ -732,10 +789,10 @@ def isis_structure_protrusion(session, structures):
     attr_name = f"{ATTR_PREFIX}structure_protrusion"
     _register_attr(session, attr_name)
 
-    for structure in structures:
+    for structure, _chains in _chain_groups(sel):
         session.logger.info(f"Protrusion index on {structure.name}...")
 
-        for chain_id, seq, residues in _get_chains(structure):
+        for chain_id, seq, residues in _chains:
             try:
                 coords = _get_ca_coords(residues)
                 protrusion = calculate_protrusion_index(coords)
@@ -746,10 +803,10 @@ def isis_structure_protrusion(session, structures):
             except Exception as e:
                 session.logger.error(f"  Chain {chain_id}: {e}")
 
-        _auto_color(session, structure, attr_name, palette="white:cyan:blue")
+        _auto_color(session, structure, attr_name, palette="white:cyan:blue", chains=_chains)
 
 
-def isis_structure_contacts(session, structures, cutoff=8.0):
+def isis_structure_contacts(session, sel, cutoff=8.0):
     """Calculate contact numbers."""
     if not METHODS_AVAILABLE:
         session.logger.error("ISIS methods module not available")
@@ -758,10 +815,10 @@ def isis_structure_contacts(session, structures, cutoff=8.0):
     attr_name = f"{ATTR_PREFIX}structure_contacts"
     _register_attr(session, attr_name)
 
-    for structure in structures:
+    for structure, _chains in _chain_groups(sel):
         session.logger.info(f"Contact number calculation on {structure.name}...")
 
-        for chain_id, seq, residues in _get_chains(structure):
+        for chain_id, seq, residues in _chains:
             try:
                 coords = _get_ca_coords(residues)
                 contacts = calculate_contact_number(coords, cutoff=cutoff)
@@ -773,10 +830,10 @@ def isis_structure_contacts(session, structures, cutoff=8.0):
             except Exception as e:
                 session.logger.error(f"  Chain {chain_id}: {e}")
 
-        _auto_color(session, structure, attr_name, palette="red:white:blue")
+        _auto_color(session, structure, attr_name, palette="red:white:blue", chains=_chains)
 
 
-def isis_structure_bfactor(session, structures):
+def isis_structure_bfactor(session, sel):
     """Display normalized B-factors."""
     if not METHODS_AVAILABLE:
         session.logger.error("ISIS methods module not available")
@@ -785,10 +842,10 @@ def isis_structure_bfactor(session, structures):
     attr_name = f"{ATTR_PREFIX}structure_bfactor"
     _register_attr(session, attr_name)
 
-    for structure in structures:
+    for structure, _chains in _chain_groups(sel):
         session.logger.info(f"B-factor analysis on {structure.name}...")
 
-        for chain_id, seq, residues in _get_chains(structure):
+        for chain_id, seq, residues in _chains:
             try:
                 bfactors = _get_bfactors(residues)
                 normalized = normalize_bfactors(bfactors)
@@ -799,23 +856,23 @@ def isis_structure_bfactor(session, structures):
             except Exception as e:
                 session.logger.error(f"  Chain {chain_id}: {e}")
 
-        _auto_color(session, structure, attr_name, palette="blue:white:red")
+        _auto_color(session, structure, attr_name, palette="blue:white:red", chains=_chains)
 
 
 # =============================================================================
 # Export and Utility Commands
 # =============================================================================
 
-def isis_export(session, structures, format="csv", output=None):
+def isis_export(session, sel, format="csv", output=None):
     """Export all ISIS predictions to file."""
     import json
     import csv
     from io import StringIO
 
-    for structure in structures:
+    for structure, _chains in _chain_groups(sel):
         data = {"structure": structure.name, "chains": []}
 
-        for chain_id, seq, residues in _get_chains(structure):
+        for chain_id, seq, residues in _chains:
             chain_data = {
                 "chain_id": chain_id,
                 "sequence": seq,
@@ -864,7 +921,7 @@ def isis_export(session, structures, format="csv", output=None):
             session.logger.info(f"Export ({format}):\n{result[:500]}...")
 
 
-def isis_color(session, structures, method=None, palette="white:yellow:red"):
+def isis_color(session, sel, method=None, palette="white:yellow:red"):
     """Color structure by ISIS prediction scores."""
     from chimerax.core.commands import run
 
@@ -883,10 +940,14 @@ def isis_color(session, structures, method=None, palette="white:yellow:red"):
         f"{ATTR_PREFIX}structure_{method}",
     ]
 
-    for structure in structures:
+    for structure, _chains in _chain_groups(sel):
+        # Look for the attribute only on the chains that were selected: a
+        # prediction stored on chain B is not evidence that chain A can be
+        # coloured by it.
+        candidates = _chain_residues(_chains)
         found_attr = None
         for attr in possible_attrs:
-            if any(hasattr(res, attr) for res in structure.residues):
+            if any(hasattr(res, attr) for res in candidates):
                 found_attr = attr
                 break
 
@@ -894,23 +955,17 @@ def isis_color(session, structures, method=None, palette="white:yellow:red"):
             session.logger.warning(f"{structure.name}: No predictions found for '{method}'")
             continue
 
-        _auto_color(session, structure, found_attr, palette)
+        _auto_color(session, structure, found_attr, palette=palette, chains=_chains)
         session.logger.info(f"Colored {structure.name} by {found_attr}")
 
 
-def isis_plot(session, residues, method=None, window=None, minMethods=3,
+def isis_plot(session, sel, method=None, window=None, minMethods=3,
               outdir=None, prefix=None):
     """
     Render prediction figures straight from an open structure.
 
     No FASTA needed: the sequence comes from the structure's own chain
     sequence, which ChimeraX has already reconciled against the model.
-
-    Takes a residue spec rather than a structure spec, so `#1/A` really does
-    mean chain A. Scoring still runs over each selected chain's *full*
-    sequence - a spec that clips a chain mid-way selects the chain, it does not
-    truncate the sequence, since a sliding window over a fragment would give
-    different scores than over the whole protein.
     """
     if not ISIS_AVAILABLE:
         session.logger.error("ISIS library not installed")
@@ -926,84 +981,77 @@ def isis_plot(session, residues, method=None, window=None, minMethods=3,
     methods = ([m.strip() for m in method.split(",")] if method
                else list(available_methods()))
 
-    # Which chains did the spec actually name? Preserve first-seen order so the
-    # output order matches the structure rather than a hash.
-    wanted = []
-    for res in residues:
-        key = (res.structure, res.chain_id)
-        if key not in wanted:
-            wanted.append(key)
-    if not wanted:
-        session.logger.warning("No polymer chains in the given specification")
-        return
-
     outdir = outdir or os.getcwd()
     os.makedirs(outdir, exist_ok=True)
 
-    for structure, chain_id in wanted:
-        chain = next((c for c in structure.chains if c.chain_id == chain_id), None)
-        if chain is None:
-            continue
-        seq = chain.characters
-        if not seq or len(seq) < 8:
-            session.logger.warning(
-                f"{structure.name}/{chain_id}: sequence too short to plot")
-            continue
+    plotted = 0
+    for structure, chains in _chain_groups(sel):
+        for chain_id, seq, _chain_res in chains:
+            try:
+                results = {m: predict(seq, method=m, window_size=window)
+                           for m in methods}
+            except Exception as e:
+                session.logger.error(f"{structure.name}/{chain_id}: {e}")
+                continue
 
-        try:
-            results = {m: predict(seq, method=m, window_size=window)
-                       for m in methods}
-        except Exception as e:
-            session.logger.error(f"{structure.name}/{chain_id}: {e}")
-            continue
+            base = prefix or os.path.splitext(structure.name)[0]
+            slug = "".join(c if c.isalnum() or c in "-_" else "_"
+                           for c in f"{base}_{chain_id}")
+            label = f"{structure.name} chain {chain_id}"
 
-        base = prefix or os.path.splitext(structure.name)[0]
-        slug = "".join(c if c.isalnum() or c in "-_" else "_"
-                       for c in f"{base}_{chain_id}")
+            written = [
+                isis_plotting.save_figure(
+                    isis_plotting.plot_profile(
+                        seq, results,
+                        subtitle=f"{label} · {len(seq)} residues"),
+                    os.path.join(outdir, f"{slug}_profile.png")),
+                isis_plotting.save_figure(
+                    isis_plotting.plot_call_matrix(seq, results),
+                    os.path.join(outdir, f"{slug}_calls.png")),
+            ]
 
-        written = [
-            isis_plotting.save_figure(
-                isis_plotting.plot_profile(
-                    seq, results,
-                    subtitle=f"{structure.name} chain {chain_id} · {len(seq)} residues"),
-                os.path.join(outdir, f"{slug}_profile.png")),
-            isis_plotting.save_figure(
-                isis_plotting.plot_call_matrix(seq, results),
-                os.path.join(outdir, f"{slug}_calls.png")),
-        ]
+            votes = np.zeros(len(seq))
+            for pred_result in results.values():
+                for ep in pred_result.epitopes:
+                    votes[ep.start - 1:ep.end] += 1
+            written.append(isis_plotting.save_figure(
+                isis_plotting.plot_consensus(seq, votes,
+                                             min_methods=minMethods,
+                                             n_methods=len(results)),
+                os.path.join(outdir, f"{slug}_consensus.png")))
 
-        votes = np.zeros(len(seq))
-        for res_pred in results.values():
-            for ep in res_pred.epitopes:
-                votes[ep.start - 1:ep.end] += 1
-        written.append(isis_plotting.save_figure(
-            isis_plotting.plot_consensus(seq, votes, min_methods=minMethods,
-                                         n_methods=len(results)),
-            os.path.join(outdir, f"{slug}_consensus.png")))
-
-        session.logger.info(
-            f"{structure.name}/{chain_id}: {len(seq)} residues, "
-            f"{len(methods)} methods")
-        for path in written:
-            # Clickable in the ChimeraX log, so the figure is one click away.
+            plotted += 1
             session.logger.info(
-                f'&nbsp;&nbsp;<a href="file://{path}">{os.path.basename(path)}</a>',
-                is_html=True)
+                f"{structure.name}/{chain_id}: {len(seq)} residues, "
+                f"{len(methods)} methods")
+            for path in written:
+                # Clickable in the ChimeraX log, so the figure is one click away.
+                session.logger.info(
+                    f'&nbsp;&nbsp;<a href="file://{path}">{os.path.basename(path)}</a>',
+                    is_html=True)
+
+    if plotted == 0:
+        session.logger.warning("No polymer chains in the given specification")
 
 
-def isis_clear(session, structures):
+def isis_clear(session, sel):
     """Remove all ISIS prediction attributes."""
-    for structure in structures:
+    for structure, _chains in _chain_groups(sel):
+        # Clear only the selected chains, so `isis clear #1/A` leaves the
+        # predictions on B and C intact.
         cleared = set()
-        for res in structure.residues:
+        for res in _chain_residues(_chains):
             for attr in list(vars(res).keys()):
                 if attr.startswith(ATTR_PREFIX):
                     delattr(res, attr)
                     cleared.add(attr)
+        chain_list = ",".join(cid for cid, _s, _r in _chains)
         if cleared:
-            session.logger.info(f"{structure.name}: Cleared {len(cleared)} attributes")
+            session.logger.info(
+                f"{structure.name}/{chain_list}: Cleared {len(cleared)} attributes")
         else:
-            session.logger.info(f"{structure.name}: No ISIS attributes found")
+            session.logger.info(
+                f"{structure.name}/{chain_list}: No ISIS attributes found")
 
 
 def isis_list(session):
@@ -1059,17 +1107,17 @@ def isis_list(session):
 # Legacy Commands (backward compatibility)
 # =============================================================================
 
-def isis_predict(session, structures, method="emini", window=None, threshold=None):
+def isis_predict(session, sel, method="emini", window=None, threshold=None):
     """Legacy predict command - redirects to isis_bcell_linear."""
-    isis_bcell_linear(session, structures, method=method, window=window, threshold=threshold)
+    isis_bcell_linear(session, sel, method=method, window=window, threshold=threshold)
 
 
-def isis_consensus(session, structures, min_methods=2, min_length=6):
+def isis_consensus(session, sel, min_methods=2, min_length=6):
     """Legacy consensus command - redirects to isis_bcell_consensus."""
-    isis_bcell_consensus(session, structures, min_methods=min_methods, min_length=min_length)
+    isis_bcell_consensus(session, sel, min_methods=min_methods, min_length=min_length)
 
 
-def isis_epitopes(session, structures, method="emini", color="red"):
+def isis_epitopes(session, sel, method="emini", color="red"):
     """Color only predicted epitope regions."""
     if not ISIS_AVAILABLE:
         session.logger.error("ISIS library not installed")
@@ -1077,8 +1125,8 @@ def isis_epitopes(session, structures, method="emini", color="red"):
 
     from chimerax.core.commands import run
 
-    for structure in structures:
-        for chain_id, seq, residues in _get_chains(structure):
+    for structure, _chains in _chain_groups(sel):
+        for chain_id, seq, residues in _chains:
             try:
                 pred = predict(seq, method=method)
                 for epitope in pred.epitopes:
@@ -1102,21 +1150,21 @@ def register_all_commands(session):
 
         # B-cell commands
         desc = CmdDesc(
-            required=[("structures", AtomicStructuresArg)],
+            required=[("sel", ResiduesArg)],
             keyword=[("method", StringArg), ("window", IntArg), ("threshold", FloatArg)],
             synopsis="B-cell linear epitope prediction"
         )
         reg("isis bcell linear", desc, isis_bcell_linear)
 
         desc = CmdDesc(
-            required=[("structures", AtomicStructuresArg)],
+            required=[("sel", ResiduesArg)],
             keyword=[("method", StringArg)],
             synopsis="B-cell conformational epitope prediction"
         )
         reg("isis bcell conformational", desc, isis_bcell_conformational)
 
         desc = CmdDesc(
-            required=[("structures", AtomicStructuresArg)],
+            required=[("sel", ResiduesArg)],
             keyword=[("min_methods", IntArg), ("min_length", IntArg)],
             synopsis="B-cell consensus prediction"
         )
@@ -1124,33 +1172,33 @@ def register_all_commands(session):
 
         # T-cell commands
         desc = CmdDesc(
-            required=[("structures", AtomicStructuresArg)],
+            required=[("sel", ResiduesArg)],
             keyword=[("allele", StringArg), ("length", IntArg)],
             synopsis="MHC Class I binding prediction"
         )
         reg("isis tcell mhc1", desc, isis_tcell_mhc1)
 
         desc = CmdDesc(
-            required=[("structures", AtomicStructuresArg)],
+            required=[("sel", ResiduesArg)],
             keyword=[("allele", StringArg)],
             synopsis="MHC Class II binding prediction"
         )
         reg("isis tcell mhc2", desc, isis_tcell_mhc2)
 
         desc = CmdDesc(
-            required=[("structures", AtomicStructuresArg)],
+            required=[("sel", ResiduesArg)],
             synopsis="Proteasomal cleavage prediction"
         )
         reg("isis tcell proteasome", desc, isis_tcell_proteasome)
 
         desc = CmdDesc(
-            required=[("structures", AtomicStructuresArg)],
+            required=[("sel", ResiduesArg)],
             synopsis="TAP transport prediction"
         )
         reg("isis tcell tap", desc, isis_tcell_tap)
 
         desc = CmdDesc(
-            required=[("structures", AtomicStructuresArg)],
+            required=[("sel", ResiduesArg)],
             keyword=[("allele", StringArg)],
             synopsis="T-cell consensus prediction"
         )
@@ -1158,80 +1206,80 @@ def register_all_commands(session):
 
         # Innate immunity commands
         desc = CmdDesc(
-            required=[("structures", AtomicStructuresArg)],
+            required=[("sel", ResiduesArg)],
             keyword=[("glyco_type", StringArg)],
             synopsis="Glycosylation site prediction"
         )
         reg("isis innate glyco", desc, isis_innate_glyco)
 
         desc = CmdDesc(
-            required=[("structures", AtomicStructuresArg)],
+            required=[("sel", ResiduesArg)],
             synopsis="Signal peptide prediction"
         )
         reg("isis innate signal", desc, isis_innate_signal)
 
         desc = CmdDesc(
-            required=[("structures", AtomicStructuresArg)],
+            required=[("sel", ResiduesArg)],
             synopsis="TLR ligand motif prediction"
         )
         reg("isis innate tlr", desc, isis_innate_tlr)
 
         desc = CmdDesc(
-            required=[("structures", AtomicStructuresArg)],
+            required=[("sel", ResiduesArg)],
             synopsis="Innate immunity consensus"
         )
         reg("isis innate consensus", desc, isis_innate_consensus)
 
         # Structural commands
         desc = CmdDesc(
-            required=[("structures", AtomicStructuresArg)],
+            required=[("sel", ResiduesArg)],
             synopsis="Calculate SASA"
         )
         reg("isis structure sasa", desc, isis_structure_sasa)
 
         desc = CmdDesc(
-            required=[("structures", AtomicStructuresArg)],
+            required=[("sel", ResiduesArg)],
             synopsis="Calculate protrusion index"
         )
         reg("isis structure protrusion", desc, isis_structure_protrusion)
 
         desc = CmdDesc(
-            required=[("structures", AtomicStructuresArg)],
+            required=[("sel", ResiduesArg)],
             keyword=[("cutoff", FloatArg)],
             synopsis="Calculate contact numbers"
         )
         reg("isis structure contacts", desc, isis_structure_contacts)
 
         desc = CmdDesc(
-            required=[("structures", AtomicStructuresArg)],
+            required=[("sel", ResiduesArg)],
             synopsis="Analyze B-factors"
         )
         reg("isis structure bfactor", desc, isis_structure_bfactor)
 
         # Utility commands
         desc = CmdDesc(
-            required=[("structures", AtomicStructuresArg)],
+            required=[("sel", ResiduesArg)],
             keyword=[("format", StringArg), ("output", StringArg)],
             synopsis="Export predictions"
         )
         reg("isis export", desc, isis_export)
 
         desc = CmdDesc(
-            required=[("structures", AtomicStructuresArg)],
+            required=[("sel", ResiduesArg)],
             keyword=[("method", StringArg), ("palette", StringArg)],
             synopsis="Color by prediction scores"
         )
         reg("isis color", desc, isis_color)
 
         desc = CmdDesc(
-            required=[("structures", AtomicStructuresArg)],
+            required=[("sel", ResiduesArg)],
             synopsis="Clear ISIS attributes"
         )
         reg("isis clear", desc, isis_clear)
 
         # Residue spec (not structure spec) so `isis plot #1/A` honours the chain.
         desc = CmdDesc(
-            required=[("residues", ResiduesArg)],
+            required=[("sel", ResiduesArg)],
             keyword=[("method", StringArg), ("window", IntArg),
                      ("minMethods", IntArg), ("outdir", StringArg),
                      ("prefix", StringArg)],
@@ -1244,21 +1292,21 @@ def register_all_commands(session):
 
         # Legacy commands (backward compatibility)
         desc = CmdDesc(
-            required=[("structures", AtomicStructuresArg)],
+            required=[("sel", ResiduesArg)],
             keyword=[("method", StringArg), ("window", IntArg), ("threshold", FloatArg)],
             synopsis="Predict B-cell epitopes (legacy)"
         )
         reg("isis predict", desc, isis_predict)
 
         desc = CmdDesc(
-            required=[("structures", AtomicStructuresArg)],
+            required=[("sel", ResiduesArg)],
             keyword=[("min_methods", IntArg), ("min_length", IntArg)],
             synopsis="Consensus prediction (legacy)"
         )
         reg("isis consensus", desc, isis_consensus)
 
         desc = CmdDesc(
-            required=[("structures", AtomicStructuresArg)],
+            required=[("sel", ResiduesArg)],
             keyword=[("method", StringArg), ("color", StringArg)],
             synopsis="Highlight epitope regions"
         )
