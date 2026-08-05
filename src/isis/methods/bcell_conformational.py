@@ -132,18 +132,26 @@ def calculate_protrusion_index(coords: ArrayLike) -> np.ndarray:
     if len(coords) == 1:
         return np.array([0.0])
 
-    # Calculate centroid
-    centroid = np.mean(coords, axis=0)
+    # Rows may be all-NaN for residues with no resolved CA position (e.g.
+    # missing density in the model) - exclude them from the centroid/max
+    # distance calculation so a few missing residues don't poison every
+    # other residue's protrusion index. Their own output stays NaN.
+    valid = ~np.isnan(coords).any(axis=1)
+    if not np.any(valid):
+        return np.full(len(coords), np.nan)
 
-    # Calculate distances from centroid
+    # Calculate centroid over resolved residues only
+    centroid = np.mean(coords[valid], axis=0)
+
+    # Calculate distances from centroid (NaN rows propagate to NaN distances)
     distances = np.linalg.norm(coords - centroid, axis=1)
 
-    # Normalize by maximum distance
-    max_distance = np.max(distances)
+    # Normalize by maximum distance among resolved residues
+    max_distance = np.max(distances[valid])
     if max_distance > 0:
         protrusion_index = distances / max_distance
     else:
-        protrusion_index = np.zeros(len(coords))
+        protrusion_index = np.where(valid, 0.0, np.nan)
 
     return protrusion_index
 

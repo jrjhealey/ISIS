@@ -69,20 +69,29 @@ ATTR_PREFIX = "isis_"
 # =============================================================================
 
 def _get_chains(structure):
-    """Extract chains with sequences from structure."""
+    """
+    Extract chains with sequences from structure.
+
+    Uses chain.residues (not chain.existing_residues): the former is
+    index-parallel with chain.characters, with None standing in for any
+    position not present in the model (common in cryo-EM/crystal structures
+    with disordered/unresolved loops). chain.existing_residues is compacted
+    and drops those gaps, which silently misaligns sequence position i with
+    the wrong residue for any chain that isn't fully modeled.
+    """
     chains = []
     for chain in structure.chains:
         seq = chain.characters
         if seq and len(seq) >= 6:
-            chains.append((chain.chain_id, seq, chain.existing_residues))
+            chains.append((chain.chain_id, seq, chain.residues))
     return chains
 
 
 def _get_ca_coords(residues):
-    """Extract CA coordinates from residues."""
+    """Extract CA coordinates from residues (None entries -> NaN row for gaps)."""
     coords = []
     for res in residues:
-        ca = res.find_atom("CA")
+        ca = res.find_atom("CA") if res is not None else None
         if ca is not None:
             coords.append(ca.coord)
         else:
@@ -91,30 +100,35 @@ def _get_ca_coords(residues):
 
 
 def _get_sasa_values(session, structure, residues):
-    """Get SASA values for residues using ChimeraX."""
+    """Get SASA values for residues using ChimeraX (None entries -> NaN for gaps)."""
     from chimerax.core.commands import run
 
     # Run SASA calculation
     run(session, f"measure sasa {structure.atomspec}", log=False)
 
-    # Extract per-residue SASA from atoms
+    # Extract per-residue SASA from atoms (ChimeraX stores per-atom SASA as `.area`)
     sasa_values = []
     for res in residues:
-        res_sasa = sum(getattr(a, 'sasa', 0) or 0 for a in res.atoms)
-        sasa_values.append(res_sasa)
+        if res is None:
+            sasa_values.append(np.nan)
+        else:
+            sasa_values.append(sum(getattr(a, 'area', 0) or 0 for a in res.atoms))
     return np.array(sasa_values)
 
 
 def _get_bfactors(residues):
-    """Extract average B-factors per residue."""
+    """Extract average B-factors per residue (None entries -> NaN for gaps)."""
     bfactors = []
     for res in residues:
+        if res is None:
+            bfactors.append(np.nan)
+            continue
         ca = res.find_atom("CA")
         if ca is not None:
             bfactors.append(ca.bfactor)
         else:
             atoms_bf = [a.bfactor for a in res.atoms if hasattr(a, 'bfactor')]
-            bfactors.append(np.mean(atoms_bf) if atoms_bf else 0)
+            bfactors.append(np.mean(atoms_bf) if atoms_bf else np.nan)
     return np.array(bfactors)
 
 
@@ -126,10 +140,29 @@ def _register_attr(session, attr_name):
 
 
 def _store_scores(residues, scores, attr_name):
-    """Store scores as residue attributes."""
+    """Store scores as residue attributes (skips gap positions, res is None)."""
     for i, res in enumerate(residues):
-        if i < len(scores) and not np.isnan(scores[i]):
+        if res is not None and i < len(scores) and not np.isnan(scores[i]):
             setattr(res, attr_name, float(scores[i]))
+
+
+def _dense_from_tcell_result(result, seq_len):
+    """
+    Map a TcellPredictionResult onto a dense per-residue array.
+
+    TcellPredictionResult.peptides is a list of plain peptide strings (not
+    dicts), parallel to .scores and .positions (each peptide's 1-indexed
+    start position). Each peptide's score is spread (via max) across the
+    residue span it covers.
+    """
+    scores = np.zeros(seq_len)
+    positions = result.positions if result.positions else list(range(1, len(result.peptides) + 1))
+    for pep, start, score in zip(result.peptides, positions, result.scores):
+        end = start + len(pep) - 1
+        for pos in range(start, end + 1):
+            if 0 <= pos - 1 < seq_len:
+                scores[pos - 1] = max(scores[pos - 1], score)
+    return scores
 
 
 def _auto_color(session, structure, attr_name, palette="white:yellow:red"):
@@ -238,10 +271,13 @@ def isis_bcell_conformational(session, structures, method="discotope"):
 
                 _store_scores(residues, result['scores'], attr_name)
 
-                n_epitopes = len(result.get('epitopes', []))
-                session.logger.info(f"  Chain {chain_id}: {n_epitopes} epitopes")
-                for ep in result.get('epitopes', []):
-                    session.logger.info(f"    {ep['start']}-{ep['end']}: score={ep['score']:.2f}")
+                epitopes = result.get('epitopes', [])
+                session.logger.info(f"  Chain {chain_id}: {len(epitopes)} epitopes")
+                for ep in epitopes:
+                    # ConformationalEpitope.residue_indices are 0-indexed and
+                    # may be non-contiguous (spatial, not sequence, clusters)
+                    span = f"{min(ep.residue_indices)+1}-{max(ep.residue_indices)+1}"
+                    session.logger.info(f"    {span} ({ep.size} residues): {ep.residues} score={ep.score:.2f}")
 
             except Exception as e:
                 session.logger.error(f"  Chain {chain_id}: {e}")
@@ -299,14 +335,17 @@ def isis_bcell_consensus(session, structures, min_methods=2, min_length=6):
                                 predictor = ElliProPredictor()
                             result = predictor.predict_with_structure(seq, sasa, contacts, coords)
                             for ep in result.get('epitopes', []):
-                                for pos in range(ep['start'], ep['end'] + 1):
-                                    if 1 <= pos <= len(seq):
-                                        votes[pos - 1] += 1
+                                # residue_indices are 0-indexed and may be
+                                # non-contiguous - vote at exactly those
+                                # positions, not a start-end range
+                                for idx in ep.residue_indices:
+                                    if 0 <= idx < len(seq):
+                                        votes[idx] += 1
                             methods_run += 1
-                        except:
-                            pass
-                except:
-                    pass
+                        except Exception as e:
+                            session.logger.warning(f"  Chain {chain_id}: {method} failed: {e}")
+                except Exception as e:
+                    session.logger.warning(f"  Chain {chain_id}: conformational setup failed: {e}")
 
             _store_scores(residues, votes, attr_name)
 
@@ -341,20 +380,16 @@ def isis_tcell_mhc1(session, structures, allele="HLA-A*02:01", length=9):
             try:
                 result = predictor.predict_mhc1(seq, allele=allele, peptide_length=length)
 
-                # Map peptide scores back to positions
-                scores = np.zeros(len(seq))
-                for pep in result.peptides:
-                    for pos in range(pep['start'], pep['end'] + 1):
-                        if 0 <= pos - 1 < len(scores):
-                            scores[pos - 1] = max(scores[pos - 1], pep['score'])
-
+                scores = _dense_from_tcell_result(result, len(seq))
                 _store_scores(residues, scores, attr_name)
 
                 # Report top binders
-                binders = result.get_binders(percentile=10)
-                session.logger.info(f"  Chain {chain_id}: {len(binders)} top binders (<10th percentile)")
+                binders = result.get_binders()
+                session.logger.info(f"  Chain {chain_id}: {len(binders)} top binders (>= threshold)")
                 for pep in binders[:5]:
-                    session.logger.info(f"    {pep['start']}-{pep['end']}: {pep['peptide']} (IC50={pep.get('ic50', 'N/A')})")
+                    end = pep['position'] + len(pep['peptide']) - 1
+                    ic50 = pep.get('ic50', 'N/A')
+                    session.logger.info(f"    {pep['position']}-{end}: {pep['peptide']} (IC50={ic50})")
 
             except Exception as e:
                 session.logger.error(f"  Chain {chain_id}: {e}")
@@ -379,18 +414,14 @@ def isis_tcell_mhc2(session, structures, allele="HLA-DRB1*01:01"):
             try:
                 result = predictor.predict_mhc2(seq, allele=allele)
 
-                scores = np.zeros(len(seq))
-                for pep in result.peptides:
-                    for pos in range(pep['start'], pep['end'] + 1):
-                        if 0 <= pos - 1 < len(scores):
-                            scores[pos - 1] = max(scores[pos - 1], pep['score'])
-
+                scores = _dense_from_tcell_result(result, len(seq))
                 _store_scores(residues, scores, attr_name)
 
-                binders = result.get_binders(percentile=10)
+                binders = result.get_binders()
                 session.logger.info(f"  Chain {chain_id}: {len(binders)} top binders")
                 for pep in binders[:5]:
-                    session.logger.info(f"    {pep['start']}-{pep['end']}: {pep['peptide']}")
+                    end = pep['position'] + len(pep['peptide']) - 1
+                    session.logger.info(f"    {pep['position']}-{end}: {pep['peptide']}")
 
             except Exception as e:
                 session.logger.error(f"  Chain {chain_id}: {e}")
@@ -414,10 +445,10 @@ def isis_tcell_proteasome(session, structures):
         for chain_id, seq, residues in _get_chains(structure):
             try:
                 result = predictor.predict_cleavage(seq)
-                _store_scores(residues, result['scores'], attr_name)
+                _store_scores(residues, result.scores, attr_name)
 
                 # Report top cleavage sites
-                top_sites = sorted(enumerate(result['scores']), key=lambda x: -x[1])[:10]
+                top_sites = sorted(enumerate(result.scores), key=lambda x: -x[1])[:10]
                 session.logger.info(f"  Chain {chain_id}: Top cleavage sites:")
                 for pos, score in top_sites[:5]:
                     session.logger.info(f"    Position {pos+1}: {seq[pos]} (score={score:.2f})")
@@ -445,13 +476,7 @@ def isis_tcell_tap(session, structures):
             try:
                 result = predictor.predict_tap(seq)
 
-                # Map peptide scores to positions
-                scores = np.zeros(len(seq))
-                for pep in result.get('peptides', []):
-                    for pos in range(pep['start'], pep['end'] + 1):
-                        if 0 <= pos - 1 < len(scores):
-                            scores[pos - 1] = max(scores[pos - 1], pep['score'])
-
+                scores = _dense_from_tcell_result(result, len(seq))
                 _store_scores(residues, scores, attr_name)
                 session.logger.info(f"  Chain {chain_id}: TAP scores computed")
 
@@ -478,20 +503,15 @@ def isis_tcell_consensus(session, structures, allele="HLA-A*02:01"):
             try:
                 result = predictor.predict_pipeline(seq, allele=allele)
 
-                # Map combined scores to positions
-                scores = np.zeros(len(seq))
-                for pep in result.peptides:
-                    for pos in range(pep['start'], pep['end'] + 1):
-                        if 0 <= pos - 1 < len(scores):
-                            scores[pos - 1] = max(scores[pos - 1], pep['combined_score'])
-
+                scores = _dense_from_tcell_result(result, len(seq))
                 _store_scores(residues, scores, attr_name)
 
-                # Report top candidates
-                top = sorted(result.peptides, key=lambda x: -x['combined_score'])[:10]
+                # Report top candidates (result.get_binders() sorts by score, descending)
+                top = result.get_binders()[:10]
                 session.logger.info(f"  Chain {chain_id}: Top T-cell epitope candidates:")
                 for pep in top[:5]:
-                    session.logger.info(f"    {pep['start']}-{pep['end']}: {pep['peptide']} (score={pep['combined_score']:.2f})")
+                    end = pep['position'] + len(pep['peptide']) - 1
+                    session.logger.info(f"    {pep['position']}-{end}: {pep['peptide']} (score={pep['score']:.2f})")
 
             except Exception as e:
                 session.logger.error(f"  Chain {chain_id}: {e}")
@@ -523,13 +543,21 @@ def isis_innate_glyco(session, structures, glyco_type="n"):
                 else:
                     result = predictor.predict_o_glyco(seq)
 
-                _store_scores(residues, result['scores'], attr_name)
+                # predict_n_glyco/predict_o_glyco return sparse per-site lists
+                # (one entry per detected site), not one score per residue -
+                # expand into a dense per-residue array before storing.
+                dense_scores = np.zeros(len(seq))
+                for pos, score in zip(result['positions'], result['scores']):
+                    if 1 <= pos <= len(seq):
+                        dense_scores[pos - 1] = score
+                _store_scores(residues, dense_scores, attr_name)
 
-                # Report sites
-                sites = [i+1 for i, s in enumerate(result['scores']) if s > 0.5]
-                session.logger.info(f"  Chain {chain_id}: {len(sites)} potential sites")
-                for motif in result.get('motifs', [])[:10]:
-                    session.logger.info(f"    Position {motif['position']}: {motif['motif']} ({motif.get('type', 'canonical')})")
+                # Report sites (result['sites'] holds the full dict per site)
+                sites = result.get('sites', [])
+                high_conf = [s for s in sites if s['score'] > 0.5]
+                session.logger.info(f"  Chain {chain_id}: {len(high_conf)} potential sites")
+                for site in sites[:10]:
+                    session.logger.info(f"    Position {site['position']}: {site['motif']} ({site.get('site_type', 'canonical')})")
 
             except Exception as e:
                 session.logger.error(f"  Chain {chain_id}: {e}")
@@ -593,19 +621,21 @@ def isis_innate_tlr(session, structures):
             try:
                 result = predictor.predict_tlr_motifs(seq)
 
-                # Score positions by TLR relevance
+                # Score positions by TLR relevance (result['matches'] holds the
+                # full per-match dicts; result['motifs'] is just matched sequence text)
+                matches = result.get('matches', [])
                 scores = np.zeros(len(seq))
-                for motif in result.get('motifs', []):
-                    start, end = motif['start'], motif['end']
+                for match in matches:
+                    start, end = match['position'], match['end']
                     for pos in range(start, end + 1):
                         if 0 <= pos - 1 < len(scores):
-                            scores[pos - 1] = max(scores[pos - 1], motif.get('score', 1.0))
+                            scores[pos - 1] = max(scores[pos - 1], match.get('score', 1.0))
 
                 _store_scores(residues, scores, attr_name)
 
-                session.logger.info(f"  Chain {chain_id}: {len(result.get('motifs', []))} TLR-relevant motifs")
-                for motif in result.get('motifs', [])[:5]:
-                    session.logger.info(f"    {motif['type']}: positions {motif['start']}-{motif['end']}")
+                session.logger.info(f"  Chain {chain_id}: {len(matches)} TLR-relevant motifs")
+                for match in matches[:5]:
+                    session.logger.info(f"    {match['motif_name']}: positions {match['position']}-{match['end']}")
 
             except Exception as e:
                 session.logger.error(f"  Chain {chain_id}: {e}")
@@ -631,20 +661,24 @@ def isis_innate_consensus(session, structures):
                 # Combine all innate predictions
                 scores = np.zeros(len(seq))
 
-                # N-glycosylation
+                # N-glycosylation (sparse per-site results -> dense per-residue)
                 n_glyco = predictor.predict_n_glyco(seq)
-                scores += np.array(n_glyco['scores']) * 0.3
+                for pos, score in zip(n_glyco['positions'], n_glyco['scores']):
+                    if 1 <= pos <= len(seq):
+                        scores[pos - 1] += 0.3 * score
 
-                # O-glycosylation
+                # O-glycosylation (sparse per-site results -> dense per-residue)
                 o_glyco = predictor.predict_o_glyco(seq)
-                scores += np.array(o_glyco['scores']) * 0.3
+                for pos, score in zip(o_glyco['positions'], o_glyco['scores']):
+                    if 1 <= pos <= len(seq):
+                        scores[pos - 1] += 0.3 * score
 
-                # TLR motifs
+                # TLR motifs (result['matches'] holds the full per-match dicts)
                 tlr = predictor.predict_tlr_motifs(seq)
-                for motif in tlr.get('motifs', []):
-                    for pos in range(motif['start'], motif['end'] + 1):
+                for match in tlr.get('matches', []):
+                    for pos in range(match['position'], match['end'] + 1):
                         if 0 <= pos - 1 < len(scores):
-                            scores[pos - 1] += 0.4 * motif.get('score', 1.0)
+                            scores[pos - 1] += 0.4 * match.get('score', 1.0)
 
                 _store_scores(residues, scores, attr_name)
                 session.logger.info(f"  Chain {chain_id}: Innate consensus computed")
@@ -780,14 +814,21 @@ def isis_export(session, structures, format="csv", output=None):
                 "predictions": {}
             }
 
-            # Collect all ISIS attributes
+            # First pass: discover which ISIS attributes are present anywhere
+            # in this chain (gap/None positions never carry attributes).
+            attr_names = set()
             for res in residues:
-                for attr in dir(res):
-                    if attr.startswith(ATTR_PREFIX):
-                        if attr not in chain_data["predictions"]:
-                            chain_data["predictions"][attr] = []
-                        val = getattr(res, attr, None)
-                        chain_data["predictions"][attr].append(val if val else 0)
+                if res is not None:
+                    attr_names.update(a for a in dir(res) if a.startswith(ATTR_PREFIX))
+
+            # Second pass: build one dense, position-aligned list per attribute
+            # so index i always corresponds to seq[i], even across gaps.
+            for attr in attr_names:
+                values = []
+                for res in residues:
+                    val = getattr(res, attr, None) if res is not None else None
+                    values.append(val if val else 0)
+                chain_data["predictions"][attr] = values
 
             data["chains"].append(chain_data)
 

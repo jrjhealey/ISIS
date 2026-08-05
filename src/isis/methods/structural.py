@@ -261,14 +261,24 @@ def normalize_bfactors(
     if len(bfactors) == 0:
         raise ValueError("bfactors array cannot be empty")
 
+    # NaN entries mark residues with no B-factor (e.g. unresolved/missing
+    # density in the model) and must not poison the mean/std used to
+    # normalize the rest - compute stats over valid entries only, and leave
+    # NaN positions as NaN in the output.
+    valid = ~np.isnan(bfactors)
+    if not np.any(valid):
+        return np.full_like(bfactors, np.nan)
+
     # Handle constant B-factors
-    std = np.std(bfactors)
+    std = np.std(bfactors[valid])
     if std < 1e-10:
-        # All B-factors are the same - return 0.5 for all
-        return np.full_like(bfactors, 0.5)
+        # All B-factors are the same - return 0.5 for all valid entries
+        normalized = np.full_like(bfactors, np.nan)
+        normalized[valid] = 0.5
+        return normalized
 
     # Z-score normalization
-    mean = np.mean(bfactors)
+    mean = np.mean(bfactors[valid])
     z_scores = (bfactors - mean) / std
 
     # Transform to 0-1 using sigmoid
