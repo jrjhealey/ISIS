@@ -16,9 +16,18 @@ residues are on the surface":
   contacts_only    - inverted contact number (fewer contacts = more exposed)
 
 If a composite method cannot beat its own cheapest input feature, its extra
-machinery is not earning anything. The sequence-only B-cell scales are run over
-the same antigens too, so structure-based and sequence-based methods are
-compared on identical ground truth.
+machinery is not earning anything.
+
+The sequence-only B-cell scales are also run over these antigens, but they are
+reported as an OUT-OF-DOMAIN REFERENCE, not as competitors. They predict linear
+epitopes - contiguous stretches recognised in denatured or peptide form - and
+this benchmark scores antibody contact patches on a folded surface. Those are
+different targets, so a low score here is not evidence a scale is bad at the
+job it was designed for; Kolaskar-Tongaonkar in particular scores well on the
+linear IEDB benchmark and below chance here, because it favours buried
+hydrophobic residues. The reason to report them anyway is that this tool lets a
+user run a linear scale and colour a structure with it, and these numbers say
+what that does and does not mean.
 """
 import json
 import os
@@ -154,17 +163,30 @@ def main():
           f"complexes, {sum(len(c['sequence']) for c in complexes):,} residues")
     print("Ground truth: antigen residues within 4 A of antibody (Ponomarenko & Bourne)")
     print("=" * 92)
-    print(f"{'method':<26}{'AUC':>8}{'±sd':>7}{'med':>7}{'>0.5':>7}"
-          f"{'MCC':>8}{'F1':>7}{'Sens':>7}{'Spec':>7}")
+    groups = [
+        ("STRUCTURE-BASED PREDICTORS (on-target)",
+         [n for n in order if n in ("discotope", "ellipro", "seppa")]),
+        ("SINGLE-FEATURE CONTROLS (what the methods must beat)",
+         [n for n in order if n.endswith("_only")]),
+        ("SEQUENCE LINEAR SCALES (out-of-domain reference - different target)",
+         [n for n in order if n.startswith("seq:")]),
+    ]
+    for title, names in groups:
+        if not names:
+            continue
+        print(f"\n{title}")
+        print(f"{'method':<26}{'AUC':>8}{'±sd':>7}{'med':>7}{'>0.5':>7}"
+              f"{'MCC':>8}{'F1':>7}{'Sens':>7}{'Spec':>7}")
+        print("-" * 92)
+        for name in names:
+            s = summary[name]
+            print(f"{name:<26}{s['auc']:>8.3f}{s['auc_sd']:>7.3f}{s['auc_median']:>7.3f}"
+                  f"{s['frac_above_random']:>7.0%}{s['mcc']:>8.3f}{s['f1']:>7.3f}"
+                  f"{s['sens']:>7.3f}{s['spec']:>7.3f}")
     print("-" * 92)
-    for name in order:
-        s = summary[name]
-        print(f"{name:<26}{s['auc']:>8.3f}{s['auc_sd']:>7.3f}{s['auc_median']:>7.3f}"
-              f"{s['frac_above_random']:>7.0%}{s['mcc']:>8.3f}{s['f1']:>7.3f}"
-              f"{s['sens']:>7.3f}{s['spec']:>7.3f}")
-    print("-" * 92)
-    print("Reference points from the literature: SEMA 0.76, DiscoTope-2.0 < that, "
-          "random = 0.50")
+    print("Literature reference: SEMA 0.76, DiscoTope-2.0 below that, random 0.50.")
+    print("Sequence scales target linear epitopes, not contact patches - their")
+    print("numbers here measure cross-domain transfer, not their own accuracy.")
 
     # ---- figures, in the shared ISIS style ----
     try:
