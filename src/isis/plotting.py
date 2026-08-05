@@ -576,45 +576,55 @@ def plot_metric_comparison(
     return fig
 
 
-def plot_mcc_ranking(
-    mcc_by_method: Dict[str, float],
-    title: str = "Correlation with ground truth (MCC)",
+def plot_metric_ranking(
+    values_by_method: Dict[str, float],
+    reference: float = 0.0,
+    title: str = "Performance ranking",
     subtitle: Optional[str] = None,
+    xlabel: str = "Score",
 ) -> plt.Figure:
     """
-    Horizontal MCC bars against a zero reference.
+    Horizontal bars ranked against a chance-level reference.
 
-    MCC has a meaningful zero - it is exactly the score of random guessing -
-    so the figure is built around that line. Bars are coloured by sign as a
-    status (better/worse than chance), which is polarity rather than identity,
-    with the value printed on every bar.
+    Built around an explicit reference line because the metrics used here each
+    have a meaningful chance level, and it is not always zero: MCC is 0 for
+    random guessing, AUC is 0.5. Bars grow from that line and are coloured by
+    which side of it they fall on - polarity, not identity - so "no better than
+    chance" is visible rather than inferred. Passing the wrong reference (0 for
+    an AUC chart) would paint every method as a success.
     """
     apply_style()
-    order = sorted(mcc_by_method, key=lambda k: mcc_by_method[k])
-    vals = [mcc_by_method[k] for k in order]
-    colors = [STATUS["good"] if v > 0 else STATUS["critical"] for v in vals]
+    order = sorted(values_by_method, key=lambda k: values_by_method[k])
+    vals = [values_by_method[k] for k in order]
+    colors = [STATUS["good"] if v > reference else STATUS["critical"] for v in vals]
 
     fig, ax = plt.subplots(figsize=(7.6, 0.44 * len(order) + 2.0))
 
     y = np.arange(len(order))
-    ax.barh(y, vals, height=0.62, color=colors, lw=0, zorder=2)
-    ax.axvline(0, color=INK["secondary"], lw=1.0, zorder=3)
+    # Bars measured from the reference, so length reads as "margin over chance"
+    ax.barh(y, [v - reference for v in vals], left=reference,
+            height=0.62, color=colors, lw=0, zorder=2)
+    ax.axvline(reference, color=INK["secondary"], lw=1.0, zorder=3)
 
     for yi, v in zip(y, vals):
-        ax.annotate(f"{v:+.3f}",
+        right = v >= reference
+        ax.annotate(f"{v:.3f}",
                     xy=(v, yi),
-                    xytext=(4 if v >= 0 else -4, 0), textcoords="offset points",
-                    ha="left" if v >= 0 else "right", va="center",
+                    xytext=(4 if right else -4, 0), textcoords="offset points",
+                    ha="left" if right else "right", va="center",
                     fontsize=7.5, color=INK["secondary"])
 
     ax.set_yticks(y)
     ax.set_yticklabels(order, fontsize=8.5, color=INK["secondary"])
-    ax.set_xlabel("Matthews correlation coefficient")
+    ax.set_xlabel(xlabel)
     ax.grid(axis="y", visible=False)
     ax.grid(axis="x", visible=True)
 
-    pad = max(0.05, max(abs(min(vals)), abs(max(vals))) * 0.35)
-    ax.set_xlim(min(min(vals), 0) - pad, max(max(vals), 0) + pad)
+    spread = max(abs(v - reference) for v in vals) or 0.05
+    pad = spread * 0.45
+    ax.set_xlim(min(min(vals), reference) - pad, max(max(vals), reference) + pad)
+    ax.annotate("chance", xy=(reference, -0.85), xycoords=("data", "data"),
+                ha="center", va="top", fontsize=7, color=INK["muted"])
 
     fig.suptitle(title, x=0.012, y=1.02, ha="left", fontsize=12,
                  fontweight="bold", color=INK["primary"])
@@ -728,3 +738,12 @@ def plot_score_distribution(
              ha="left", fontsize=8.5, color=INK["muted"])
     fig.tight_layout(rect=(0, 0, 1, 0.94))
     return fig
+
+
+def plot_mcc_ranking(mcc_by_method: Dict[str, float],
+                     title: str = "Correlation with ground truth (MCC)",
+                     subtitle: Optional[str] = None) -> plt.Figure:
+    """MCC ranking - a metric ranking whose chance level is zero."""
+    return plot_metric_ranking(mcc_by_method, reference=0.0, title=title,
+                               subtitle=subtitle,
+                               xlabel="Matthews correlation coefficient")
