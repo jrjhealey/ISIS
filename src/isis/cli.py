@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 from typing import List, Tuple
 
-from . import predict, predict_all, available_methods, __version__
+from . import predict, predict_all, available_methods, METHOD_INFO, __version__
 
 
 def parse_fasta(text: str) -> List[Tuple[str, str]]:
@@ -244,17 +244,80 @@ def cmd_plot(args):
 
 
 def cmd_list_methods(args):
-    """List available prediction methods."""
-    from .scales import METHOD_INFO
+    """
+    List every prediction category, deriving details from what is installed.
 
-    print("Available prediction methods:\n")
+    Deliberately covers all categories, not just the linear scales: this
+    previously listed only the five sequence methods long after conformational,
+    T-cell and innate prediction had been added, so it under-reported the tool
+    to anyone who ran it to find out what was available.
+    """
+    print("ISIS prediction methods\n")
+
+    print("B-cell linear (sequence only) -- isis predict / isis plot")
     for method in available_methods():
-        info = METHOD_INFO[method]
+        info = METHOD_INFO.get(method, {})
+        window = info.get("window", "?")
+        thr = info.get("threshold", "average")
         print(f"  {method}")
-        print(f"    {info['name']}")
-        print(f"    Window: {info['default_window']}, Threshold: {info['default_threshold'] or 'average'}")
-        print(f"    {info['description']}")
-        print()
+        print(f"    {info.get('name', method)}")
+        print(f"    Window: {window}, Threshold: {thr}")
+        if info.get("description"):
+            print(f"    {info['description']}")
+    print()
+
+    print("B-cell conformational (requires 3D structure) -- ChimeraX only")
+    try:
+        from .methods.bcell_conformational import (
+            DiscoTopePredictor, ElliProPredictor, SEPPAPredictor)
+        for key, cls in (("discotope", DiscoTopePredictor),
+                         ("ellipro", ElliProPredictor),
+                         ("seppa", SEPPAPredictor)):
+            print(f"  {key}: {getattr(cls, 'description', key)}")
+        print("    Needs SASA and coordinates; use `isis bcell conformational`")
+        print("    inside ChimeraX, which computes them from the open structure.")
+    except ImportError:
+        print("  (methods module not installed)")
+    print()
+
+    print("T-cell / MHC binding -- ChimeraX only")
+    try:
+        from .models.mhc_predictor import MHCPredictor
+        mp = MHCPredictor()
+        for cls, label in ((1, "mhc1 (MHC class I)"), (2, "mhc2 (MHC class II)")):
+            alleles = mp.available_alleles(cls)
+            print(f"  {label}: {len(alleles)} alleles installed")
+            for a in alleles:
+                print(f"    {a}")
+        print("  proteasome: proteasomal cleavage sites")
+        print("  tap: TAP transport efficiency")
+    except Exception as e:
+        print(f"  (MHC models unavailable: {e})")
+    print()
+
+    print("Innate immunity -- ChimeraX only")
+    try:
+        from .methods.innate import InnatePredictor  # noqa: F401
+        print("  glyco: N- and O-glycosylation sequons")
+        print("  signal: signal peptide detection")
+        print("  tlr: TLR ligand motifs")
+    except ImportError:
+        print("  (methods module not installed)")
+    print()
+
+    print("Structural analysis -- ChimeraX only")
+    print("  sasa, protrusion, contacts, bfactor")
+    print()
+
+    print("Benchmarked accuracy (details in benchmark/ in the repository)")
+    print("  MHC-I binding    AUC 0.82-0.95 per allele (mean 0.87) - most reliable")
+    print("  Conformational   AUC 0.61-0.68; no method beats plain SASA (0.67)")
+    print("  B-cell linear    only kolaskar-tongaonkar beats chance on linear IEDB")
+    print("                   epitopes (MCC +0.15), and it is BELOW chance on")
+    print("                   structural contact patches - different targets")
+    print("  Signal peptide   4/6 on positive/negative controls - weak")
+    print("  O-glycosylation  flags 58-83% of all S/T - not discriminative")
+    print("  proteasome, tap, tlr: not yet benchmarked")
 
 
 def main():

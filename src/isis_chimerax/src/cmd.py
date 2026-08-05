@@ -1055,52 +1055,97 @@ def isis_clear(session, sel):
 
 
 def isis_list(session):
-    """List all available prediction methods."""
-    session.logger.info("ISIS Prediction Methods:")
-    session.logger.info("")
+    """
+    List available prediction methods and the alleles actually installed.
 
-    session.logger.info("B-cell Linear (sequence-based):")
+    Allele lists are queried from the loaded model files rather than written
+    out here. A hard-coded list drifts the moment models are retrained - this
+    one previously advertised HLA-DRB1*04:01, which was never shipped, while
+    omitting six MHC-I alleles that were.
+    """
+    log = session.logger.info
+
+    log("ISIS Prediction Methods:")
+    log("")
+
+    log("B-cell Linear (sequence-based) - isis bcell linear:")
     if ISIS_AVAILABLE:
         for method in available_methods():
             info = METHOD_INFO.get(method, {})
-            session.logger.info(f"  {method}: {info.get('name', method)}")
+            log(f"  {method}: {info.get('name', method)}")
     else:
-        session.logger.info("  (ISIS core not installed)")
+        log("  (ISIS core not installed)")
 
-    session.logger.info("")
-    session.logger.info("B-cell Conformational (structure-based):")
+    log("")
+    log("B-cell Conformational (needs 3D structure) - isis bcell conformational:")
     if METHODS_AVAILABLE:
-        session.logger.info("  discotope: DiscoTope-style (SASA + propensity + contacts)")
-        session.logger.info("  ellipro: ElliPro-style (protrusion index)")
-        session.logger.info("  seppa: SEPPA-style (surface patches)")
+        for key, predictor in (("discotope", DiscoTopePredictor),
+                               ("ellipro", ElliProPredictor),
+                               ("seppa", SEPPAPredictor)):
+            log(f"  {key}: {getattr(predictor, 'description', key)}")
     else:
-        session.logger.info("  (methods module not installed)")
+        log("  (methods module not installed)")
 
-    session.logger.info("")
-    session.logger.info("T-cell (MHC binding):")
+    log("")
+    log("T-cell (MHC binding) - isis tcell mhc1 / mhc2:")
     if METHODS_AVAILABLE:
-        session.logger.info("  mhc1: MHC Class I binding (HLA-A*02:01, HLA-A*01:01, HLA-B*07:02)")
-        session.logger.info("  mhc2: MHC Class II binding (HLA-DRB1*01:01, HLA-DRB1*04:01)")
-        session.logger.info("  proteasome: Proteasomal cleavage sites")
-        session.logger.info("  tap: TAP transport efficiency")
+        try:
+            from isis.models.mhc_predictor import MHCPredictor
+            mp = MHCPredictor()
+            mhc1 = mp.available_alleles(1)
+            mhc2 = mp.available_alleles(2)
+            log(f"  mhc1: {len(mhc1)} alleles installed")
+            for a in mhc1:
+                log(f"    {a}")
+            log(f"  mhc2: {len(mhc2)} alleles installed")
+            for a in mhc2:
+                log(f"    {a}")
+        except Exception as e:
+            log(f"  (MHC models unavailable: {e})")
+        log("  proteasome: Proteasomal cleavage sites")
+        log("  tap: TAP transport efficiency")
+        log("  consensus: combined MHC + cleavage + TAP pipeline")
     else:
-        session.logger.info("  (methods module not installed)")
+        log("  (methods module not installed)")
 
-    session.logger.info("")
-    session.logger.info("Innate Immunity:")
+    log("")
+    log("Innate Immunity - isis innate:")
     if METHODS_AVAILABLE:
-        session.logger.info("  glyco: N- and O-glycosylation sites")
-        session.logger.info("  signal: Signal peptide detection")
-        session.logger.info("  tlr: TLR ligand motifs")
+        log("  glyco: N- and O-glycosylation sequons")
+        log("  signal: Signal peptide detection")
+        log("  tlr: TLR ligand motifs")
+        log("  consensus: weighted combination of the above")
     else:
-        session.logger.info("  (methods module not installed)")
+        log("  (methods module not installed)")
 
-    session.logger.info("")
-    session.logger.info("Structural Analysis:")
-    session.logger.info("  sasa: Solvent accessible surface area")
-    session.logger.info("  protrusion: Protrusion index")
-    session.logger.info("  contacts: Residue contact numbers")
-    session.logger.info("  bfactor: Normalized B-factors")
+    log("")
+    log("Structural Analysis - isis structure:")
+    log("  sasa: Solvent accessible surface area")
+    log("  protrusion: Protrusion index")
+    log("  contacts: Residue contact numbers")
+    log("  bfactor: Normalized B-factors")
+
+    log("")
+    log("Output and utilities:")
+    log("  isis plot: per-residue figures from the structure's own sequence"
+        + ("" if PLOTTING_AVAILABLE else "  (matplotlib missing)"))
+    log("  isis export: scores to CSV/JSON")
+    log("  isis color / isis clear: recolour or remove stored scores")
+
+    log("")
+    log("Specs: any command accepts a residue spec, so #1/A means chain A only.")
+    log("A spec that clips a chain selects it without truncating its sequence.")
+
+    log("")
+    log("Benchmarked accuracy (see benchmark/ in the repository):")
+    log("  MHC-I binding      AUC 0.82-0.95 per allele (mean 0.87) - most reliable")
+    log("  Conformational     AUC 0.61-0.68; none beats plain SASA (0.67)")
+    log("  B-cell linear      only kolaskar-tongaonkar exceeds chance on linear")
+    log("                     IEDB epitopes (MCC +0.15); it is BELOW chance for")
+    log("                     structural contact patches - the targets differ")
+    log("  Signal peptide     4/6 on positive/negative controls - weak")
+    log("  O-glycosylation    flags 58-83% of all S/T - not discriminative")
+    log("  proteasome, tap, tlr: not yet benchmarked")
 
 
 # =============================================================================

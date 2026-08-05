@@ -1,16 +1,21 @@
 # ISIS - In Silico Immunogenicity Studies
 
-B-cell epitope prediction using established amino acid property scales. Predict which regions of a protein are likely to be recognized by antibodies.
+Immunogenicity prediction across B-cell, T-cell and innate recognition, with
+3D visualisation in ChimeraX. Every prediction class has been benchmarked
+against experimental data, and the measured accuracy is reported below --
+including where methods do not work.
 
 ## Features
 
-- **5 prediction methods** based on peer-reviewed amino acid property scales
-- **Consensus analysis** combining all methods for higher confidence
-- **Python API** for scripting and pipelines
-- **Command-line interface** for batch processing
-- **ChimeraX plugin** for 3D visualization on protein structures
-
----
+- **B-cell linear** -- 5 amino-acid property scales, with consensus voting
+- **B-cell conformational** -- DiscoTope / ElliPro / SEPPA styles, from 3D structure
+- **T-cell** -- MHC class I and II binding from models trained on IEDB, plus
+  proteasomal cleavage and TAP transport
+- **Innate** -- N-/O-glycosylation sequons, signal peptides, TLR ligand motifs
+- **Structural features** -- SASA, protrusion index, contact number, B-factors
+- **Publication-style plots** -- one consistent visual language, from CLI or ChimeraX
+- **Benchmarks included** -- reproducible, with the datasets committed
+- **Python API**, **command line**, and **ChimeraX plugin**
 
 ## Installation
 
@@ -109,16 +114,96 @@ isis consensus #1
 
 ## Prediction Methods
 
-| Method | Property | Window | Threshold | Use Case |
-|--------|----------|--------|-----------|----------|
-| `emini` | Surface accessibility | 6 | 1.0 | Surface-exposed regions |
-| `parker` | Hydrophilicity | 7 | average | Hydrophilic/antigenic regions |
-| `chou-fasman` | Beta-turn propensity | 7 | average | Loop regions |
-| `kolaskar-tongaonkar` | Antigenicity | 7 | 1.0 | ~75% accuracy on known epitopes |
-| `karplus-schulz` | Flexibility | 7 | 1.0 | Flexible, accessible regions |
+### Measured accuracy
 
----
+Benchmarks are in `benchmark/`, with datasets committed so results reproduce
+without re-downloading. Read this table before trusting any single method.
 
+| Class | Best method | Benchmark | Result |
+|---|---|---|---|
+| **T-cell MHC-I** | per-allele RF models | held-out IEDB peptides | **AUC 0.82-0.95** (mean 0.87) |
+| **T-cell MHC-II** | HLA-DRB1*01:01 | held-out IEDB peptides | AUC 0.76 |
+| **B-cell conformational** | `ellipro` | 47 antibody-antigen complexes | AUC 0.68 |
+| **B-cell linear** | `kolaskar-tongaonkar` | 49 antigens, IEDB positions | MCC +0.15 |
+| **N-glycosylation** | motif scan | spike glycan sites | recovers all 5 known sites |
+| Signal peptide | -- | 6 pos/neg controls | 4/6 -- weak |
+| O-glycosylation | -- | control proteins | flags 58-83% of S/T -- not usable |
+| proteasome, TAP, TLR | -- | -- | not yet benchmarked |
+
+Three findings worth knowing before you pick a method:
+
+1. **MHC-I is the most trustworthy component.** Note that `HLA-A*02:01`, the
+   most requested allele, is among the *weakest* installed (AUC 0.82) despite
+   having the most training data.
+2. **No conformational method beats plain solvent accessibility.** `sasa_only`
+   scores AUC 0.669 against ElliPro's 0.684 (p=0.057, not significant), and
+   nothing built from these features exceeds ~0.69 under leave-one-antigen-out
+   CV. Published SEMA reaches 0.76 using inverse-folding embeddings, so closing
+   that gap needs different features rather than reweighting these.
+3. **"Best B-cell method" depends on which epitope you mean.**
+   Kolaskar-Tongaonkar is the only linear scale beating chance on linear IEDB
+   epitopes, yet it is *below* chance on structural antibody-contact patches
+   (AUC 0.418) because it favours buried hydrophobic residues. Four of the five
+   linear scales sit at or below chance (MCC -0.10 to -0.17) on linear epitopes.
+
+### B-cell linear (sequence only)
+
+| Method | Property | Window | Threshold |
+|--------|----------|--------|-----------|
+| `emini` | Surface accessibility | 6 | 1.0 |
+| `parker` | Hydrophilicity | 7 | average |
+| `chou-fasman` | Beta-turn propensity | 7 | average |
+| `kolaskar-tongaonkar` | Antigenicity | 7 | 1.0 |
+| `karplus-schulz` | Flexibility | 7 | 1.0 |
+
+### B-cell conformational (needs 3D structure)
+
+| Method | Basis |
+|--------|-------|
+| `discotope` | propensity + contact number + log SASA |
+| `ellipro` | protrusion index from the centroid |
+| `seppa` | scoring over surface patches |
+
+These need SASA and coordinates, so they run inside ChimeraX (which computes
+both from the open structure) rather than from a bare sequence.
+
+### T-cell
+
+`mhc1` and `mhc2` use Random Forest models trained on IEDB binding data.
+Run `isis list` (ChimeraX) or `isis list-methods` (CLI) for the alleles actually
+installed -- both read the model files rather than a hard-coded list.
+
+| Method | Predicts |
+|--------|----------|
+| `mhc1` | MHC class I binding, 8-11mers, per allele |
+| `mhc2` | MHC class II binding, 15mers with 9mer core |
+| `proteasome` | proteasomal cleavage sites |
+| `tap` | TAP transport efficiency |
+| `consensus` | weighted MHC + cleavage + TAP pipeline |
+
+### Innate
+
+| Method | Predicts |
+|--------|----------|
+| `glyco` | N-glycosylation sequons (N-X-S/T) and O-glycosylation sites |
+| `signal` | signal peptide and cleavage position |
+| `tlr` | TLR ligand motifs, LPS-binding and basic/hydrophobic patches |
+
+### Chain and residue specifications
+
+Every ChimeraX command takes a residue spec, so a chain selector is honoured:
+
+```
+isis bcell linear #1        # every chain
+isis bcell linear #1/A      # chain A only
+isis bcell linear #1/A,C    # chains A and C
+```
+
+Colouring, export and clearing are confined to the chains named. A spec that
+clips a chain part-way (`#1/A:100-200`) selects that chain but does **not**
+truncate it -- scoring always runs over the full chain sequence, because a
+sliding window over a fragment would not reproduce the scores it has in the
+whole protein.
 ## ChimeraX Commands
 
 ### `isis predict` - Single Method Prediction
@@ -189,6 +274,89 @@ isis consensus #1 min_methods 4 min_length 8
 - If no consensus found with default thresholds, automatically loosens thresholds
 
 ---
+
+### `isis bcell conformational` - Structure-Based Epitopes
+
+Requires 3D structure; SASA and coordinates are computed from the open model.
+
+```
+isis bcell conformational #1/A method discotope
+isis bcell conformational #1/A method ellipro
+isis bcell conformational #1/A method seppa
+```
+
+`discotope` derives its cut-off from the protein's own score distribution
+(top 15% of residues). It does **not** use the published DiscoTope 2.0 value of
+-7.7: that belongs to a different score scale, and against this implementation's
+range it labelled every residue an epitope.
+
+### `isis tcell` - T-cell Epitopes
+
+```
+isis tcell mhc1 #1/A allele HLA-A*02:01
+isis tcell mhc2 #1/A allele HLA-DRB1*01:01
+isis tcell proteasome #1/A
+isis tcell tap #1/A
+isis tcell consensus #1/A allele HLA-A*02:01
+```
+
+Run `isis list` for installed alleles. Requesting one that is not installed
+raises an error naming the available options.
+
+### `isis innate` - Innate Recognition
+
+```
+isis innate glyco #1/A
+isis innate glyco #1/A glycoType o
+isis innate signal #1/A
+isis innate tlr #1/A
+isis innate consensus #1/A
+```
+
+### `isis structure` - Structural Features
+
+```
+isis structure sasa #1/A
+isis structure protrusion #1/A
+isis structure contacts #1/A cutoff 8.0
+isis structure bfactor #1/A
+```
+
+### `isis bcell consensus` - Combine All B-cell Methods
+
+```
+isis bcell consensus #1/A
+isis bcell consensus #1/A minMethods 3 minLength 8
+```
+
+Votes across the linear scales and, when a structure is present, the
+conformational methods too, storing the count per residue. The benchmark shows
+consensus voting does not rescue the weak linear scales, so treat a high vote
+count as agreement rather than as evidence of accuracy.
+
+### `isis export` - Scores to File
+
+```
+isis export #1/A format csv
+isis export #1/A format json output scores.json
+```
+
+Exports every ISIS score stored on the selected chains, one column per method,
+aligned to sequence position. Positions with no modelled residue export as 0.
+
+### `isis plot` - Figures From the Structure
+
+No FASTA needed -- the sequence comes from the structure's own chain sequence.
+
+```
+isis plot #1                       # all chains, all methods
+isis plot #1/A                     # chain A only
+isis plot #1/A method emini,parker window 9 outdir figures/ prefix myprotein
+```
+
+Writes a per-residue profile, a method call-matrix and a consensus track per
+chain, logging clickable links. Needs matplotlib in ChimeraX's Python (it ships
+with ChimeraX 1.12).
 
 ### `isis color` - Color by Scores
 
@@ -513,6 +681,78 @@ Sequences must be at least 6 amino acids (the minimum epitope length).
 - Or manually lower threshold: `isis predict #1 threshold 0.8`
 
 ---
+
+---
+
+## Benchmarks
+
+Reproducible, with datasets committed so nothing needs re-downloading.
+
+### Linear B-cell epitopes -- 49 antigens
+
+```bash
+python3 benchmark/run_benchmark.py
+```
+
+49 antigens across 32 organisms (24,183 residues, 10,657 IEDB-confirmed epitope
+positions). Sequences fetched from NCBI, positions verified against the actual
+sequence.
+
+| Method | Sens | Spec | F1 | MCC |
+|---|---|---|---|---|
+| kolaskar-tongaonkar | 0.63 | 0.53 | 0.52 | **+0.148** |
+| karplus-schulz | 0.35 | 0.51 | 0.32 | -0.135 |
+| chou-fasman | 0.28 | 0.56 | 0.30 | -0.133 |
+| parker | 0.28 | 0.53 | 0.29 | -0.169 |
+| emini | 0.16 | 0.75 | 0.20 | -0.104 |
+
+MCC is 0 for random guessing. Consensus voting does not rescue the weak scales
+at any threshold from 1 to 5.
+
+To rebuild the dataset from scratch (needs the IEDB dump and network):
+
+```bash
+python3 benchmark/scan_iedb.py
+python3 benchmark/fetch_sequences.py
+python3 benchmark/select_final_set.py
+```
+
+### Conformational epitopes -- 47 antibody-antigen complexes
+
+```bash
+python3 benchmark/conformational/build_dataset.py     # fetches from RCSB
+python3 benchmark/conformational/run_benchmark.py
+python3 benchmark/conformational/fit_consensus.py
+```
+
+Complexes from Table 2 of Ponomarenko & Bourne 2007, the canonical benchmark for
+this task. Whole-protein antigens (61-613 aa: lysozyme, hemagglutinin,
+neuraminidase, EGFR, VEGF-A, prion protein, OspA, CD3 and others), 8,706
+residues, 832 epitope residues.
+
+Ground truth is an observed physical contact -- an antigen residue with any atom
+within 4 Å of any antibody atom -- not a curated annotation.
+
+Structural features are computed on the antigen **alone**, with the antibody
+deleted. Computing SASA on the complex would bury exactly the epitope residues,
+making the feature encode the label.
+
+| Method | AUC | vs plain SASA |
+|---|---|---|
+| ellipro | 0.684 | +0.015 (p=0.057, ns) |
+| *sasa_only (control)* | *0.669* | -- |
+| discotope | 0.659 | -0.010 (ns) |
+| seppa | 0.612 | -0.056 (worse) |
+| best fitted combination | 0.689 | +0.021 (p=0.117, ns) |
+
+Reference: SEMA 0.76, random 0.50.
+
+### Rendering
+
+```bash
+python3 benchmark/render_ghost.py            # inside ChimeraX
+python3 benchmark/make_contact_sheets.py
+```
 
 ## Legacy Code
 
