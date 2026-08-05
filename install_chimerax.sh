@@ -24,6 +24,7 @@ error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
 CHIMERAX_PYTHON=""
 CHIMERAX_BIN=""
+CHIMERAX_SITE_PACKAGES=""
 
 find_chimerax() {
     # An explicit override is the only reliable answer on an unusual layout.
@@ -88,6 +89,45 @@ main() {
     info "Looking for ChimeraX..."
     find_chimerax
 
+    # Ask ChimeraX itself for the interpreter and site-packages it actually uses,
+    # and prefer that over anything guessed from the directory layout.
+    #
+    # This is the fix for the worst variant of "the installer ran and nothing
+    # changed". On macOS, globbing the app bundle finds
+    #   .../ChimeraX.app/Contents/bin/python3.11
+    # but ChimeraX runs out of
+    #   .../Contents/Library/Frameworks/Python.framework/Versions/3.11/...
+    # If those do not share a site-packages, pip installs into a directory
+    # ChimeraX never imports from: pip reports success, and nothing changes.
+    # ChimeraX's own `pip` command cannot be used instead - it only accepts
+    # package names, not paths or wheels - so the interpreter has to be right.
+    if [[ -n "${CHIMERAX_BIN:-}" && -x "${CHIMERAX_BIN:-}" ]]; then
+        local probe="${TMPDIR:-/tmp}/isis_probe_$$.py"
+        cat > "$probe" <<'PYPROBE'
+import os, sys, sysconfig
+def run(session):
+    py = os.path.join(sys.prefix, "bin",
+                      "python%d.%d" % sys.version_info[:2])
+    if not os.path.exists(py):
+        py = os.path.join(sys.prefix, "bin", "python3")
+    print("ISIS_PY:" + (py if os.path.exists(py) else ""))
+    print("ISIS_SP:" + (sysconfig.get_paths().get("purelib") or ""))
+run(session)
+PYPROBE
+        local probe_out authoritative_py
+        probe_out="$("$CHIMERAX_BIN" --nogui --exit --script "$probe" 2>/dev/null)"
+        rm -f "$probe"
+        authoritative_py="$(sed -n 's/^ISIS_PY://p' <<< "$probe_out" | head -1)"
+        CHIMERAX_SITE_PACKAGES="$(sed -n 's/^ISIS_SP://p' <<< "$probe_out" | head -1)"
+        if [[ -n "$authoritative_py" && -x "$authoritative_py" ]]; then
+            if [[ "$authoritative_py" != "$CHIMERAX_PYTHON" ]]; then
+                warn "Detected python was $CHIMERAX_PYTHON"
+                warn "but ChimeraX itself runs $authoritative_py - using ChimeraX's."
+            fi
+            CHIMERAX_PYTHON="$authoritative_py"
+        fi
+    fi
+
     if [[ -z "$CHIMERAX_PYTHON" || ! -x "$CHIMERAX_PYTHON" ]]; then
         error "Could not find ChimeraX's Python interpreter."
         echo
@@ -99,6 +139,24 @@ main() {
 
     info "ChimeraX Python : $CHIMERAX_PYTHON"
     info "ChimeraX binary : ${CHIMERAX_BIN:-<not found>}"
+    [[ -n "$CHIMERAX_SITE_PACKAGES" ]] && \
+        info "Site-packages   : $CHIMERAX_SITE_PACKAGES"
+    # Confirm the chosen interpreter writes where ChimeraX reads. If it does not,
+    # every later step would succeed while changing nothing ChimeraX can see.
+    if [[ -n "$CHIMERAX_SITE_PACKAGES" ]]; then
+        local pip_target
+        pip_target="$("$CHIMERAX_PYTHON" -c \
+            'import sysconfig;print(sysconfig.get_paths().get("purelib",""))' 2>/dev/null)"
+        if [[ -n "$pip_target" && "$pip_target" != "$CHIMERAX_SITE_PACKAGES" ]]; then
+            error "The interpreter found does NOT install where ChimeraX reads:"
+            error "  interpreter installs to : $pip_target"
+            error "  ChimeraX imports from   : $CHIMERAX_SITE_PACKAGES"
+            error "Anything installed with it would be invisible to ChimeraX."
+            error "Set CHIMERAX_PYTHON_OVERRIDE to an interpreter whose"
+            error "site-packages matches, and re-run."
+            exit 1
+        fi
+    fi
     echo
 
     # ---- 1. the prediction library, WITH the extras it needs -----------------
@@ -133,6 +191,59 @@ main() {
     # can carry old metadata, silently reinstalling the very version you are
     # trying to replace.
     rm -rf "$BUNDLE_DIR/build" "$BUNDLE_DIR/dist" "$BUNDLE_DIR"/*.egg-info 2>/dev/null || true
+
+    # Remove EVERY existing copy of the bundle first.
+    #
+    # ChimeraX searches its user data directory (on macOS
+    # ~/Library/Application Support/ChimeraX/<ver>/lib/pythonX.Y/site-packages)
+    # BEFORE the application directory. A bundle put there by an earlier
+    # `devel install` therefore shadows a newer one installed into the app: the
+    # new files are on disk but never imported, so new commands come back as
+    # "Unknown command" and the listing stays stale, while the installer reports
+    # success. Ask ChimeraX itself where the copies are - it knows its own
+    # sys.path - then delete them all.
+    info "Removing any previously installed copies of the bundle..."
+    local finder="${TMPDIR:-/tmp}/isis_find_copies_$$.py"
+    cat > "$finder" <<'PYFIND'
+import os, sys
+def run(session):
+    seen = []
+    for p in sys.path:
+        cand = os.path.join(p, "chimerax", "isis")
+        if os.path.isdir(cand):
+            real = os.path.realpath(cand)
+            if real not in seen:
+                seen.append(real)
+                print("ISIS_COPY:" + real)
+    try:
+        from chimerax import app_dirs
+        for root, dirs, _f in os.walk(app_dirs.user_data_dir):
+            if os.path.basename(root) == "isis" and \
+               os.path.basename(os.path.dirname(root)) == "chimerax":
+                real = os.path.realpath(root)
+                if real not in seen:
+                    seen.append(real)
+                    print("ISIS_COPY:" + real)
+    except Exception:
+        pass
+run(session)
+PYFIND
+    local copies
+    copies="$("$CHIMERAX_BIN" --nogui --exit --script "$finder" 2>/dev/null \
+              | sed -n 's/^ISIS_COPY://p' | sort -u)"
+    rm -f "$finder"
+    if [[ -n "$copies" ]]; then
+        while IFS= read -r c; do
+            [[ -n "$c" && -d "$c" ]] || continue
+            info "  removing $c"
+            rm -rf "$c"
+            # take the dist-info/egg-info with it, or pip believes it is present
+            rm -rf "$(dirname "$(dirname "$c")")"/chimerax_isis-*.dist-info 2>/dev/null || true
+            rm -rf "$(dirname "$(dirname "$c")")"/ChimeraX_ISIS-*.egg-info 2>/dev/null || true
+        done <<< "$copies"
+    else
+        info "  none found"
+    fi
 
     # `devel install` REFUSES to replace a bundle already installed at the same
     # version - it prints "already installed with the same version" and leaves the
@@ -174,8 +285,17 @@ main() {
     echo "$report" | grep -vE '^(INFO:|WARNING:|STATUS:)$' | sed 's/^/    /'
     echo
 
+    if echo "$report" | grep -q "copies of the bundle are installed"; then
+        error "More than one copy of the bundle is installed and an old one is"
+        error "shadowing the new one. The report above lists them. Remove the"
+        error "extras by hand and re-run, or delete the ChimeraX user bundle dir."
+        exit 1
+    fi
+
     if echo "$report" | grep -q "Everything required is present"; then
         info "Installation verified."
+        echo "$report" | sed -n 's/.*Bundle loaded *: *//p' | head -1 \
+            | while read -r loaded; do info "Bundle in use: $loaded"; done
         echo
         echo "Try it:"
         echo "    open 1ubq"

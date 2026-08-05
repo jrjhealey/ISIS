@@ -1169,7 +1169,30 @@ def isis_doctor(session):
     log(f"  ChimeraX Python : {_chimerax_python()}")
     log(f"  Launcher        : {_sys.executable}")
     log(f"  Python version  : {_sys.version.split()[0]}")
-    log("  Bundle          : ChimeraX-ISIS (this plugin)")
+    # Where this module was actually imported from, plus every other copy on
+    # sys.path. ChimeraX searches its user data directory BEFORE the application
+    # directory, so a bundle installed there by an earlier `devel install`
+    # shadows a newer one installed into the app - the new code is on disk but
+    # never loaded, so new commands are "Unknown command" and the listing stays
+    # old. Reporting the load path makes that visible instead of baffling.
+    import os as _os
+    log(f"  Bundle loaded   : {_os.path.dirname(__file__)}")
+    _copies = []
+    for _p in _sys.path:
+        _cand = _os.path.join(_p, "chimerax", "isis")
+        if _os.path.isdir(_cand):
+            _real = _os.path.realpath(_cand)
+            if _real not in _copies:
+                _copies.append(_real)
+    if len(_copies) > 1:
+        session.logger.warning(
+            f"  {len(_copies)} copies of the bundle are installed. The first on "
+            f"sys.path wins and shadows the others:")
+        for _c in _copies:
+            session.logger.warning(f"    {_c}")
+        session.logger.warning(
+            "  Re-run install_chimerax.sh, which removes every copy before "
+            "installing.")
     log(f"  Core library    : isis-epitope {CORE_VERSION or 'NOT FOUND'}")
     log(f"  Expected core   : >= {'.'.join(str(v) for v in MIN_CORE_VERSION)}")
     log("")
