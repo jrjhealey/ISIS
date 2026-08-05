@@ -33,7 +33,7 @@ Legacy commands (still work):
 """
 
 from chimerax.core.commands import CmdDesc, register, StringArg, IntArg, FloatArg, BoolArg
-from chimerax.atomic import AtomicStructuresArg
+from chimerax.atomic import AtomicStructuresArg, ResiduesArg
 
 import numpy as np
 
@@ -60,6 +60,14 @@ try:
     METHODS_AVAILABLE = True
 except ImportError:
     METHODS_AVAILABLE = False
+
+# Plotting is optional - the bundle stays usable for colouring structures even
+# if matplotlib is missing from ChimeraX's Python.
+try:
+    from isis import plotting as isis_plotting
+    PLOTTING_AVAILABLE = True
+except ImportError:
+    PLOTTING_AVAILABLE = False
 
 ATTR_PREFIX = "isis_"
 
@@ -890,6 +898,99 @@ def isis_color(session, structures, method=None, palette="white:yellow:red"):
         session.logger.info(f"Colored {structure.name} by {found_attr}")
 
 
+def isis_plot(session, residues, method=None, window=None, minMethods=3,
+              outdir=None, prefix=None):
+    """
+    Render prediction figures straight from an open structure.
+
+    No FASTA needed: the sequence comes from the structure's own chain
+    sequence, which ChimeraX has already reconciled against the model.
+
+    Takes a residue spec rather than a structure spec, so `#1/A` really does
+    mean chain A. Scoring still runs over each selected chain's *full*
+    sequence - a spec that clips a chain mid-way selects the chain, it does not
+    truncate the sequence, since a sliding window over a fragment would give
+    different scores than over the whole protein.
+    """
+    if not ISIS_AVAILABLE:
+        session.logger.error("ISIS library not installed")
+        return
+    if not PLOTTING_AVAILABLE:
+        session.logger.error(
+            "Plotting needs matplotlib in ChimeraX's Python. Install with:\n"
+            "  chimerax --nogui --exit --cmd 'pip install matplotlib'")
+        return
+
+    import os
+
+    methods = ([m.strip() for m in method.split(",")] if method
+               else list(available_methods()))
+
+    # Which chains did the spec actually name? Preserve first-seen order so the
+    # output order matches the structure rather than a hash.
+    wanted = []
+    for res in residues:
+        key = (res.structure, res.chain_id)
+        if key not in wanted:
+            wanted.append(key)
+    if not wanted:
+        session.logger.warning("No polymer chains in the given specification")
+        return
+
+    outdir = outdir or os.getcwd()
+    os.makedirs(outdir, exist_ok=True)
+
+    for structure, chain_id in wanted:
+        chain = next((c for c in structure.chains if c.chain_id == chain_id), None)
+        if chain is None:
+            continue
+        seq = chain.characters
+        if not seq or len(seq) < 8:
+            session.logger.warning(
+                f"{structure.name}/{chain_id}: sequence too short to plot")
+            continue
+
+        try:
+            results = {m: predict(seq, method=m, window_size=window)
+                       for m in methods}
+        except Exception as e:
+            session.logger.error(f"{structure.name}/{chain_id}: {e}")
+            continue
+
+        base = prefix or os.path.splitext(structure.name)[0]
+        slug = "".join(c if c.isalnum() or c in "-_" else "_"
+                       for c in f"{base}_{chain_id}")
+
+        written = [
+            isis_plotting.save_figure(
+                isis_plotting.plot_profile(
+                    seq, results,
+                    subtitle=f"{structure.name} chain {chain_id} · {len(seq)} residues"),
+                os.path.join(outdir, f"{slug}_profile.png")),
+            isis_plotting.save_figure(
+                isis_plotting.plot_call_matrix(seq, results),
+                os.path.join(outdir, f"{slug}_calls.png")),
+        ]
+
+        votes = np.zeros(len(seq))
+        for res_pred in results.values():
+            for ep in res_pred.epitopes:
+                votes[ep.start - 1:ep.end] += 1
+        written.append(isis_plotting.save_figure(
+            isis_plotting.plot_consensus(seq, votes, min_methods=minMethods,
+                                         n_methods=len(results)),
+            os.path.join(outdir, f"{slug}_consensus.png")))
+
+        session.logger.info(
+            f"{structure.name}/{chain_id}: {len(seq)} residues, "
+            f"{len(methods)} methods")
+        for path in written:
+            # Clickable in the ChimeraX log, so the figure is one click away.
+            session.logger.info(
+                f'&nbsp;&nbsp;<a href="file://{path}">{os.path.basename(path)}</a>',
+                is_html=True)
+
+
 def isis_clear(session, structures):
     """Remove all ISIS prediction attributes."""
     for structure in structures:
@@ -1127,6 +1228,16 @@ def register_all_commands(session):
             synopsis="Clear ISIS attributes"
         )
         reg("isis clear", desc, isis_clear)
+
+        # Residue spec (not structure spec) so `isis plot #1/A` honours the chain.
+        desc = CmdDesc(
+            required=[("residues", ResiduesArg)],
+            keyword=[("method", StringArg), ("window", IntArg),
+                     ("minMethods", IntArg), ("outdir", StringArg),
+                     ("prefix", StringArg)],
+            synopsis="Plot prediction profiles for a structure's own sequence"
+        )
+        reg("isis plot", desc, isis_plot)
 
         desc = CmdDesc(synopsis="List prediction methods")
         reg("isis list", desc, isis_list)
